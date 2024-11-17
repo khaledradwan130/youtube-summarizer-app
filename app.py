@@ -10,7 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 # Load environment variables
 load_dotenv()
 
-def openrouter_completion(messages, model="meta-llama/llama-2-13b-chat"):
+def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct"):
     try:
         # Get API key from environment variable or Streamlit secrets
         api_key = os.getenv('OPENROUTER_API_KEY') or st.secrets['OPENROUTER_API_KEY']
