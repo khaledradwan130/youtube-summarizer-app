@@ -10,13 +10,18 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 # Load environment variables
 load_dotenv()
 
+# Get API key from environment or Streamlit secrets
+api_key = os.getenv("OPENROUTER_API_KEY")
+if api_key is None:
+    api_key = st.secrets["openrouter"]["OPENROUTER_API_KEY"]
+
 # Configure OpenAI client for OpenRouter
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    api_key=api_key,
     default_headers={
-        "HTTP-Referer": "http://localhost:8501",
-        "X-Title": "YouTube Summarizer App",
+        "HTTP-Referer": "https://aiafterdark-youtube-summarizer.streamlit.app",
+        "X-Title": "AI AfterDark - YouTube Summarizer App",
     }
 )
 
