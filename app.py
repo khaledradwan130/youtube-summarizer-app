@@ -39,7 +39,7 @@ def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct"):
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry_error_callback=lambda retry_state: None
 )
-def openrouter_completion_with_retry(messages, model="meta-llama/llama-2-13b-chat"):
+def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-instruct"):
     return openrouter_completion(messages, model)
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
