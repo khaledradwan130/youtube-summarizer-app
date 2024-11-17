@@ -10,7 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 # Load environment variables
 load_dotenv()
 
-def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct"):
+def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
     try:
         # Get API key from environment variable or Streamlit secrets
         api_key = os.getenv('OPENROUTER_API_KEY') or st.secrets['OPENROUTER_API_KEY']
@@ -39,7 +39,7 @@ def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct"):
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry_error_callback=lambda retry_state: None
 )
-def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-instruct"):
+def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
     return openrouter_completion(messages, model)
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
