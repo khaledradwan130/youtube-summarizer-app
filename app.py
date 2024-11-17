@@ -10,42 +10,37 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 # Load environment variables
 load_dotenv()
 
-# Get API key from environment or Streamlit secrets
-api_key = os.getenv("OPENROUTER_API_KEY")
-if api_key is None:
-    api_key = st.secrets["openrouter"]["OPENROUTER_API_KEY"]
+def openrouter_completion(messages, model="meta-llama/llama-2-13b-chat"):
+    try:
+        # Get API key from environment variable or Streamlit secrets
+        api_key = os.getenv('OPENROUTER_API_KEY') or st.secrets['OPENROUTER_API_KEY']
+        
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
 
-# Configure OpenAI client for OpenRouter
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=api_key,
-    default_headers={
-        "HTTP-Referer": "https://aiafterdark-youtube-summarizer.streamlit.app",
-        "X-Title": "AI AfterDark - YouTube Summarizer App",
-    }
-)
+        completion = client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://youtube-summarizer.streamlit.app",
+                "X-Title": "YouTube Summarizer by AI Afterdark",
+            },
+            model=model,
+            messages=messages
+        )
+        
+        return completion.choices[0].message.content
+    except Exception as e:
+        st.error(f"OpenRouter API Error: {str(e)}")
+        return None
 
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry_error_callback=lambda retry_state: None
 )
-def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
-    """Make a request to OpenRouter API using OpenAI SDK with retry logic"""
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=1000
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        if "429" in str(e):  # Rate limit error
-            st.warning("Rate limit reached. Waiting before retry...")
-            raise e  # This will trigger the retry
-        st.error(f"OpenRouter API Error: {str(e)}")
-        return None
+def openrouter_completion_with_retry(messages, model="meta-llama/llama-2-13b-chat"):
+    return openrouter_completion(messages, model)
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
     """Process chunks with rate limit handling"""
@@ -64,7 +59,7 @@ def process_chunks_with_rate_limit(chunks, system_prompt):
             {"role": "user", "content": f"Please provide a detailed summary of this video transcript part: {chunk}"}
         ]
         
-        summary = openrouter_completion(messages)
+        summary = openrouter_completion_with_retry(messages)
         if summary:
             summaries.append(summary)
         
@@ -204,7 +199,7 @@ def main():
                                 {"role": "user", "content": f"Create a final summary from these chunk summaries:\n\n{final_summary_prompt}"}
                             ]
                             
-                            final_summary = openrouter_completion(messages)
+                            final_summary = openrouter_completion_with_retry(messages)
                             if final_summary:
                                 st.session_state["current_summary"] = final_summary
                 except Exception as e:
@@ -243,7 +238,7 @@ def main():
                     
                     # Display assistant response
                     with st.chat_message("assistant"):
-                        assistant_response = openrouter_completion(messages)
+                        assistant_response = openrouter_completion_with_retry(messages)
                         if assistant_response:
                             st.session_state.messages.append({"role": "assistant", "content": assistant_response})
                             st.markdown(assistant_response)
