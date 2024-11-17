@@ -1,8 +1,7 @@
 # YouTube Video Summarizer
 Created by AI Afterdark - Building Innovation with AI at Night
 An AI-powered application that generates summaries of YouTube videos and enables interactive conversations about their content. This tool supports both cloud deployment (using OpenRouter) and local deployment (using Ollama).
-
-![Demo](img/YoutubeVideoSummarizer.gif)
+<img src="img/YoutubeVideoSummarizer.gif" alt="Demo" autoplay loop>
 
 ## Features
 - YouTube video transcript extraction
