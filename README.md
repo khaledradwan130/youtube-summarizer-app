@@ -1,11 +1,10 @@
 # YouTube Video Summarizer
-
 Created by AI Afterdark - Building Innovation with AI at Night
-
 An AI-powered application that generates summaries of YouTube videos and enables interactive conversations about their content. This tool supports both cloud deployment (using OpenRouter) and local deployment (using Ollama).
 
-## Features
+![Demo](img/YoutubeVideoSummarizer.gif)
 
+## Features
 - YouTube video transcript extraction
 - AI-powered content summarization
 - Interactive Q&A about video content
@@ -14,17 +13,15 @@ An AI-powered application that generates summaries of YouTube videos and enables
 - Clean, responsive UI
 
 ## Prerequisites
-
 - Python 3.11+
 - pip (Python package manager)
 - Git
 - Ollama (optional, for local deployment)
 
 ## Quick Start
-
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/youtube-summarizer-app.git
+git clone https://github.com/AIAfterDark/youtube-summarizer-app.git
 cd youtube-summarizer-app
 ```
 
@@ -43,7 +40,6 @@ pip install -r requirements.txt
 ```
 
 ### 4. Configure Environment
-
 #### Cloud Deployment (OpenRouter)
 1. Create a `.env` file in the root directory
 2. Add your OpenRouter API key:
@@ -64,12 +60,9 @@ streamlit run app.py
 ```
 
 ## Using Local Models with Ollama
-
 To use Ollama locally, modify the `openrouter_completion` function in `app.py`:
-
 ```python
 import requests
-
 def ollama_completion(messages, model="llama2"):
     try:
         response = requests.post(
@@ -83,20 +76,17 @@ def ollama_completion(messages, model="llama2"):
     except Exception as e:
         st.error(f"Ollama API Error: {str(e)}")
         return None
-
 # Replace OpenRouter function calls with Ollama
 def openrouter_completion(messages, model="llama2"):
     return ollama_completion(messages, model)
 ```
 
 ## Configuration
-
 ### Summary Detail Level
 - Short videos (<30 mins): 4000
 - Long content (1hr+): 7000+
 
 ### Available Models
-
 #### OpenRouter Models:
 - meta-llama/llama-2-13b-chat
 - anthropic/claude-2
@@ -109,7 +99,6 @@ def openrouter_completion(messages, model="llama2"):
 - neural-chat
 
 ## Contributing
-
 1. Fork the repository
 2. Create your feature branch
 3. Commit your changes
@@ -117,11 +106,9 @@ def openrouter_completion(messages, model="llama2"):
 5. Create a Pull Request
 
 ## License
-
 This project is open source and available under the MIT License. Created by AI Afterdark - feel free to use and modify, but please credit us!
 
 ## Credits
-
 Created by Will at AI Afterdark
 Built using:
 - Streamlit for web interface
@@ -130,7 +117,6 @@ Built using:
 - YouTube Transcript API for content extraction
 
 ## Contact
-
 - Twitter: @AIAfterdark
 - GitHub: AI Afterdark
 
