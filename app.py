@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from openai import OpenAI
-from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
+from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 from pytube import YouTube
 import re
 from dotenv import load_dotenv
@@ -45,66 +45,74 @@ def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-in
 
 def get_transcript(video_id):
     """Get transcript with multiple fallback options including pytube"""
+    transcript = None
+    error_messages = []
+
+    # Method 1: YouTube Transcript API
     try:
-        # First try: YouTube Transcript API
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # Try to get English transcript first
         try:
-            transcript = transcript_list.find_transcript(['en'])
+            transcript = transcript_list.find_transcript(['en']).fetch()
         except NoTranscriptFound:
-            # Fallback: Get any transcript and translate to English
             try:
-                transcript = transcript_list.find_manually_created_transcript()
+                transcript = transcript_list.find_manually_created_transcript().fetch()
             except NoTranscriptFound:
-                # Try auto-generated transcript
-                transcript = transcript_list.find_generated_transcript()
-        
-        return transcript.fetch()
-        
+                transcript = transcript_list.find_generated_transcript().fetch()
     except Exception as e:
-        st.error(f"First method failed: {str(e)}")
-        st.info("Trying pytube method...")
-        
+        error_messages.append(f"Method 1 failed: {str(e)}")
+
+    # Method 2: Direct YouTube Transcript API
+    if not transcript:
         try:
-            # Pytube fallback method
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+        except Exception as e:
+            error_messages.append(f"Method 2 failed: {str(e)}")
+
+    # Method 3: Pytube
+    if not transcript:
+        try:
             yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-            captions = yt.captions
             
-            # Try to get English captions first
-            if 'en' in captions:
-                caption = captions['en']
-            elif 'a.en' in captions:  # Auto-generated English
-                caption = captions['a.en']
-            elif len(captions) > 0:  # Get first available caption
-                caption = list(captions.values())[0]
-            else:
-                raise Exception("No captions available")
+            # Try to get English captions
+            caption = None
+            if 'en' in yt.captions:
+                caption = yt.captions['en']
+            elif 'a.en' in yt.captions:
+                caption = yt.captions['a.en']
+            elif yt.captions:
+                # Get first available caption
+                caption = list(yt.captions.values())[0]
+            
+            if caption:
+                # Convert to transcript format
+                transcript_text = caption.generate_srt_captions()
+                lines = transcript_text.split('\n\n')
+                transcript = []
                 
-            # Convert caption to transcript format
-            transcript_text = caption.generate_srt_captions()
-            # Parse SRT format into transcript format
-            lines = transcript_text.split('\n\n')
-            transcript = []
-            
-            for line in lines:
-                if not line.strip():
-                    continue
-                parts = line.split('\n')
-                if len(parts) >= 3:  # Valid SRT entry
-                    text = ' '.join(parts[2:])  # Join all text lines
-                    transcript.append({
-                        'text': text,
-                        'start': 0,  # We don't parse timestamps for simplicity
-                        'duration': 0
-                    })
-            
-            return transcript
-            
-        except Exception as e2:
-            st.error("Could not retrieve transcript using any method.")
-            st.error(f"Technical details: {str(e)}\n{str(e2)}")
-            return None
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    parts = line.split('\n')
+                    if len(parts) >= 3:
+                        text = ' '.join(parts[2:])
+                        transcript.append({
+                            'text': text,
+                            'start': 0,
+                            'duration': 0
+                        })
+            else:
+                error_messages.append("No captions available in the video")
+        except Exception as e:
+            error_messages.append(f"Method 3 failed: {str(e)}")
+
+    if not transcript:
+        st.error("Could not retrieve transcript. Please try another video.")
+        st.error("Technical details:")
+        for msg in error_messages:
+            st.error(msg)
+        return None
+
+    return transcript
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
     """Process chunks with rate limit handling"""
@@ -287,36 +295,32 @@ def main():
 
     with col2:
         st.markdown("### Chat with Video Content")
-        if "current_summary" in st.session_state:
+        if "current_summary" in st.session_state and st.session_state["current_summary"]:
             chat_container = st.container()
             with chat_container:
-                # Display messages in chronological order
+                # Display chat messages
                 for message in st.session_state.messages:
                     with st.chat_message(message["role"]):
                         st.markdown(message["content"])
-                
-                # Chat input at the bottom
+
+                # Chat input
                 if prompt := st.chat_input("Ask anything about the video..."):
-                    # Add user message and display immediately
+                    # Add user message
                     st.session_state.messages.append({"role": "user", "content": prompt})
                     with st.chat_message("user"):
                         st.markdown(prompt)
-                    
+
                     # Generate assistant response
-                    messages = [
-                        {"role": "system", "content": """You are a knowledgeable AI assistant that helps users understand video content. 
-                        Base your answers only on the information provided in the summary."""},
-                        {"role": "user", "content": f"Here is the video summary: {st.session_state['current_summary']}"},
-                        {"role": "user", "content": f"Please answer this question about the video: {prompt}"}
-                    ]
-                    
-                    # Display assistant response
                     with st.chat_message("assistant"):
-                        assistant_response = openrouter_completion_with_retry(messages)
-                        if assistant_response:
-                            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-                            st.markdown(assistant_response)
-                            st.rerun()
+                        with st.spinner("Thinking..."):
+                            messages = [
+                                {"role": "system", "content": f"""You are a helpful AI assistant that answers questions about a video based on its summary. 
+                                Here's the video summary to reference:\n\n{st.session_state["current_summary"]}"""},
+                                *st.session_state.messages,
+                            ]
+                            response = openrouter_completion_with_retry(messages)
+                            st.session_state.messages.append({"role": "assistant", "content": response})
+                            st.markdown(response)
         else:
             st.info("Generate a video summary first to start chatting!")
 
