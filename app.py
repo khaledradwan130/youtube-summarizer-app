@@ -2,6 +2,7 @@ import streamlit as st
 import os
 from openai import OpenAI
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
+from pytube import YouTube
 import re
 from dotenv import load_dotenv
 import time
@@ -43,9 +44,9 @@ def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-in
     return openrouter_completion(messages, model)
 
 def get_transcript(video_id):
-    """Get transcript with fallback options and better error handling"""
+    """Get transcript with multiple fallback options including pytube"""
     try:
-        # First try: Default transcript
+        # First try: YouTube Transcript API
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         
         # Try to get English transcript first
@@ -56,22 +57,53 @@ def get_transcript(video_id):
             try:
                 transcript = transcript_list.find_manually_created_transcript()
             except NoTranscriptFound:
-                # Final fallback: Get auto-generated transcript
+                # Try auto-generated transcript
                 transcript = transcript_list.find_generated_transcript()
         
         return transcript.fetch()
         
     except Exception as e:
-        st.error(f"Error getting transcript: {str(e)}")
-        st.info("Trying alternative method...")
+        st.error(f"First method failed: {str(e)}")
+        st.info("Trying pytube method...")
         
         try:
-            # Direct method as fallback
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+            # Pytube fallback method
+            yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+            captions = yt.captions
+            
+            # Try to get English captions first
+            if 'en' in captions:
+                caption = captions['en']
+            elif 'a.en' in captions:  # Auto-generated English
+                caption = captions['a.en']
+            elif len(captions) > 0:  # Get first available caption
+                caption = list(captions.values())[0]
+            else:
+                raise Exception("No captions available")
+                
+            # Convert caption to transcript format
+            transcript_text = caption.generate_srt_captions()
+            # Parse SRT format into transcript format
+            lines = transcript_text.split('\n\n')
+            transcript = []
+            
+            for line in lines:
+                if not line.strip():
+                    continue
+                parts = line.split('\n')
+                if len(parts) >= 3:  # Valid SRT entry
+                    text = ' '.join(parts[2:])  # Join all text lines
+                    transcript.append({
+                        'text': text,
+                        'start': 0,  # We don't parse timestamps for simplicity
+                        'duration': 0
+                    })
+            
             return transcript
+            
         except Exception as e2:
-            st.error("Could not retrieve transcript. Please ensure the video has captions enabled.")
-            st.error(f"Technical details: {str(e2)}")
+            st.error("Could not retrieve transcript using any method.")
+            st.error(f"Technical details: {str(e)}\n{str(e2)}")
             return None
 
 def process_chunks_with_rate_limit(chunks, system_prompt):

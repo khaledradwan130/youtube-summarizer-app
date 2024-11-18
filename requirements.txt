@@ -9,3 +9,4 @@ phidata==2.4.20
 psycopg[binary]==3.1.18
 sqlalchemy==2.0.29
 openrouter>=0.3.0
+pytube>=15.0.0
