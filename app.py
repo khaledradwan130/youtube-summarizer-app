@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from openai import OpenAI
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
 import re
 from dotenv import load_dotenv
 import time
@@ -41,6 +41,38 @@ def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free
 )
 def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
     return openrouter_completion(messages, model)
+
+def get_transcript(video_id):
+    """Get transcript with fallback options and better error handling"""
+    try:
+        # First try: Default transcript
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        # Try to get English transcript first
+        try:
+            transcript = transcript_list.find_transcript(['en'])
+        except NoTranscriptFound:
+            # Fallback: Get any transcript and translate to English
+            try:
+                transcript = transcript_list.find_manually_created_transcript()
+            except NoTranscriptFound:
+                # Final fallback: Get auto-generated transcript
+                transcript = transcript_list.find_generated_transcript()
+        
+        return transcript.fetch()
+        
+    except Exception as e:
+        st.error(f"Error getting transcript: {str(e)}")
+        st.info("Trying alternative method...")
+        
+        try:
+            # Direct method as fallback
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+            return transcript
+        except Exception as e2:
+            st.error("Could not retrieve transcript. Please ensure the video has captions enabled.")
+            st.error(f"Technical details: {str(e2)}")
+            return None
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
     """Process chunks with rate limit handling"""
@@ -174,8 +206,18 @@ def main():
                 try:
                     with st.spinner("Fetching video transcript..."):
                         video_id = extract_video_id(video_url)
-                        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+                        if not video_id:
+                            st.error("Invalid YouTube URL")
+                            return
+                        
+                        transcript = get_transcript(video_id)
+                        if not transcript:
+                            return
+                        
                         text = " ".join([entry["text"] for entry in transcript])
+                        if not text.strip():
+                            st.error("Retrieved transcript is empty")
+                            return
                         
                         # Split text into chunks
                         chunks = chunk_text(text, chunk_size)
