@@ -58,22 +58,29 @@ def get_transcript_yt_dlp(video_id):
             'writeautomaticsub': True,
             'subtitleslangs': ['en'],
             'skip_download': True,
-            'quiet': True
+            'quiet': True,
+            'no_warnings': True  # Suppress ffmpeg warning
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            if 'subtitles' in info and info['subtitles']:
-                # Process subtitles
-                subtitles = info['subtitles'].get('en', [])
-                if subtitles:
-                    return [{'text': sub['text'], 'start': 0, 'duration': 0} for sub in subtitles]
-            elif 'automatic_captions' in info and info['automatic_captions']:
-                # Process automatic captions
-                auto_caps = info['automatic_captions'].get('en', [])
-                if auto_caps:
-                    return [{'text': cap['text'], 'start': 0, 'duration': 0} for cap in auto_caps]
+            try:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                if 'subtitles' in info and info['subtitles']:
+                    # Process subtitles
+                    subtitles = info['subtitles'].get('en', [])
+                    if subtitles:
+                        return [{'text': sub['text'], 'start': 0, 'duration': 0} for sub in subtitles]
+                elif 'automatic_captions' in info and info['automatic_captions']:
+                    # Process automatic captions
+                    auto_caps = info['automatic_captions'].get('en', [])
+                    if auto_caps:
+                        return [{'text': cap['text'], 'start': 0, 'duration': 0} for cap in auto_caps]
+            except yt_dlp.utils.DownloadError as e:
+                if "This video has no subtitles" in str(e):
+                    return None
+                raise e
     except Exception as e:
+        st.debug(f"yt-dlp error: {str(e)}")  # Add debug logging
         return None
     return None
 
@@ -89,6 +96,10 @@ def get_transcript(video_id):
             video_id,
             languages=['en']
         )
+    except TranscriptsDisabled:
+        error_messages.append("Method 1 failed: Transcripts are disabled for this video")
+    except NoTranscriptFound:
+        error_messages.append("Method 1 failed: No transcript found for this video")
     except Exception as e:
         error_messages.append(f"Method 1 failed: {str(e)}")
 
@@ -127,6 +138,8 @@ def get_transcript(video_id):
     if not transcript:
         try:
             transcript = get_transcript_yt_dlp(video_id)
+            if not transcript:
+                error_messages.append("Method 3 failed: No captions found")
         except Exception as e:
             error_messages.append(f"Method 3 failed: {str(e)}")
 
@@ -134,7 +147,8 @@ def get_transcript(video_id):
         st.error("Could not retrieve transcript. Please try another video.")
         st.error("Technical details:")
         for msg in error_messages:
-            st.error(msg)
+            if isinstance(msg, str):  # Only show string error messages
+                st.error(msg)
         return None
 
     return transcript
