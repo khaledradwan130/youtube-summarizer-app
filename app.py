@@ -59,7 +59,7 @@ def get_transcript_yt_dlp(video_id):
             'subtitleslangs': ['en'],
             'skip_download': True,
             'quiet': True,
-            'no_warnings': True  # Suppress ffmpeg warning
+            'no_warnings': True
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -75,12 +75,9 @@ def get_transcript_yt_dlp(video_id):
                     auto_caps = info['automatic_captions'].get('en', [])
                     if auto_caps:
                         return [{'text': cap['text'], 'start': 0, 'duration': 0} for cap in auto_caps]
-            except yt_dlp.utils.DownloadError as e:
-                if "This video has no subtitles" in str(e):
-                    return None
-                raise e
-    except Exception as e:
-        st.debug(f"yt-dlp error: {str(e)}")  # Add debug logging
+            except yt_dlp.utils.DownloadError:
+                return None
+    except Exception:
         return None
     return None
 
@@ -96,62 +93,59 @@ def get_transcript(video_id):
             video_id,
             languages=['en']
         )
+        if transcript:
+            return transcript
     except TranscriptsDisabled:
-        error_messages.append("Method 1 failed: Transcripts are disabled for this video")
+        error_messages.append("Transcripts are disabled for this video")
     except NoTranscriptFound:
-        error_messages.append("Method 1 failed: No transcript found for this video")
+        error_messages.append("No transcript found for this video")
     except Exception as e:
-        error_messages.append(f"Method 1 failed: {str(e)}")
+        error_messages.append(str(e))
 
     # Method 2: Pytube
-    if not transcript:
-        try:
-            yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-            if yt.captions:
-                caption = None
-                if 'en' in yt.captions:
-                    caption = yt.captions['en']
-                elif 'a.en' in yt.captions:
-                    caption = yt.captions['a.en']
-                elif yt.captions:
-                    caption = list(yt.captions.values())[0]
-                
-                if caption:
-                    transcript_text = caption.generate_srt_captions()
-                    lines = transcript_text.split('\n\n')
-                    transcript = []
-                    for line in lines:
-                        if not line.strip():
-                            continue
-                        parts = line.split('\n')
-                        if len(parts) >= 3:
-                            text = ' '.join(parts[2:])
-                            transcript.append({
-                                'text': text,
-                                'start': 0,
-                                'duration': 0
-                            })
-        except Exception as e:
-            error_messages.append(f"Method 2 failed: {str(e)}")
+    try:
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        if yt.captions:
+            caption = None
+            if 'en' in yt.captions:
+                caption = yt.captions['en']
+            elif 'a.en' in yt.captions:
+                caption = yt.captions['a.en']
+            elif yt.captions:
+                caption = list(yt.captions.values())[0]
+            
+            if caption:
+                transcript_text = caption.generate_srt_captions()
+                lines = transcript_text.split('\n\n')
+                transcript = []
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    parts = line.split('\n')
+                    if len(parts) >= 3:
+                        text = ' '.join(parts[2:])
+                        transcript.append({
+                            'text': text,
+                            'start': 0,
+                            'duration': 0
+                        })
+                if transcript:
+                    return transcript
+    except Exception as e:
+        error_messages.append(f"Alternative caption retrieval failed: {str(e)}")
 
-    # Method 3: yt-dlp
-    if not transcript:
-        try:
-            transcript = get_transcript_yt_dlp(video_id)
-            if not transcript:
-                error_messages.append("Method 3 failed: No captions found")
-        except Exception as e:
-            error_messages.append(f"Method 3 failed: {str(e)}")
+    # Method 3: yt-dlp (last resort)
+    try:
+        transcript = get_transcript_yt_dlp(video_id)
+        if transcript:
+            return transcript
+    except Exception:
+        pass
 
-    if not transcript:
-        st.error("Could not retrieve transcript. Please try another video.")
-        st.error("Technical details:")
-        for msg in error_messages:
-            if isinstance(msg, str):  # Only show string error messages
-                st.error(msg)
-        return None
-
-    return transcript
+    # If all methods fail, show error
+    st.error("Could not retrieve transcript. Please try another video.")
+    st.error("Reason: " + error_messages[0] if error_messages else "No available transcripts found")
+    return None
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
     """Process chunks with rate limit handling"""
