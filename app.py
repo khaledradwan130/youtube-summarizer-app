@@ -198,10 +198,22 @@ def chunk_text(text, chunk_size):
     return chunks
 
 def extract_video_id(url):
-    """Extract YouTube video ID from URL"""
-    pattern = r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
-    match = re.search(pattern, url)
-    return match.group(1) if match else None
+    """Extract YouTube video ID from various URL formats"""
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',  # Standard and shortened
+        r'(?:youtu\.be\/|youtube\.com\/shorts\/)([0-9A-Za-z_-]{11})',  # youtu.be and shorts
+        r'(?:embed\/)([0-9A-Za-z_-]{11})',  # Embedded videos
+        r'^([0-9A-Za-z_-]{11})$'  # Direct video ID
+    ]
+    
+    if not url:
+        return None
+        
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
 
 def main():
     st.set_page_config(
