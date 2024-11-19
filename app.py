@@ -82,11 +82,19 @@ def get_transcript_yt_dlp(video_id):
     return None
 
 def get_transcript(video_id):
-    """Get transcript with multiple fallback options"""
+    """Get transcript with enhanced error handling and fallback options"""
     transcript = None
     error_messages = []
     
-    # Method 1: YouTube Transcript API with retry
+    # Method 1: yt-dlp (most reliable)
+    try:
+        transcript = get_transcript_yt_dlp(video_id)
+        if transcript:
+            return transcript
+    except Exception as e:
+        error_messages.append(f"yt-dlp method failed: {str(e)}")
+
+    # Method 2: YouTube Transcript API
     try:
         transcript = get_transcript_with_retry(
             YouTubeTranscriptApi.get_transcript,
@@ -95,18 +103,15 @@ def get_transcript(video_id):
         )
         if transcript:
             return transcript
-    except TranscriptsDisabled:
-        error_messages.append("Transcripts are disabled for this video")
-    except NoTranscriptFound:
-        error_messages.append("No transcript found for this video")
     except Exception as e:
-        error_messages.append(str(e))
+        error_messages.append(f"YouTube Transcript API failed: {str(e)}")
 
-    # Method 2: Pytube
+    # Method 3: Pytube (last resort)
     try:
         yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
         if yt.captions:
             caption = None
+            # Try english captions first
             if 'en' in yt.captions:
                 caption = yt.captions['en']
             elif 'a.en' in yt.captions:
@@ -116,9 +121,8 @@ def get_transcript(video_id):
             
             if caption:
                 transcript_text = caption.generate_srt_captions()
-                lines = transcript_text.split('\n\n')
                 transcript = []
-                for line in lines:
+                for line in transcript_text.split('\n\n'):
                     if not line.strip():
                         continue
                     parts = line.split('\n')
@@ -132,19 +136,12 @@ def get_transcript(video_id):
                 if transcript:
                     return transcript
     except Exception as e:
-        error_messages.append(f"Alternative caption retrieval failed: {str(e)}")
+        error_messages.append(f"Pytube method failed: {str(e)}")
 
-    # Method 3: yt-dlp (last resort)
-    try:
-        transcript = get_transcript_yt_dlp(video_id)
-        if transcript:
-            return transcript
-    except Exception:
-        pass
-
-    # If all methods fail, show error
+    # If all methods fail
+    error_message = " | ".join(error_messages) if error_messages else "No available transcripts found"
     st.error("Could not retrieve transcript. Please try another video.")
-    st.error("Reason: " + error_messages[0] if error_messages else "No available transcripts found")
+    st.error(f"Details: {error_message}")
     return None
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
