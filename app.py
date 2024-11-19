@@ -7,6 +7,9 @@ import re
 from dotenv import load_dotenv
 import time
 from tenacity import retry, stop_after_attempt, wait_exponential
+import requests
+from bs4 import BeautifulSoup
+import yt_dlp
 
 # Load environment variables
 load_dotenv()
@@ -43,65 +46,87 @@ def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free
 def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
     return openrouter_completion(messages, model)
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def get_transcript_with_retry(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+def get_transcript_yt_dlp(video_id):
+    """Get transcript using yt-dlp"""
+    try:
+        ydl_opts = {
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['en'],
+            'skip_download': True,
+            'quiet': True
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            if 'subtitles' in info and info['subtitles']:
+                # Process subtitles
+                subtitles = info['subtitles'].get('en', [])
+                if subtitles:
+                    return [{'text': sub['text'], 'start': 0, 'duration': 0} for sub in subtitles]
+            elif 'automatic_captions' in info and info['automatic_captions']:
+                # Process automatic captions
+                auto_caps = info['automatic_captions'].get('en', [])
+                if auto_caps:
+                    return [{'text': cap['text'], 'start': 0, 'duration': 0} for cap in auto_caps]
+    except Exception as e:
+        return None
+    return None
+
 def get_transcript(video_id):
-    """Get transcript with multiple fallback options including pytube"""
+    """Get transcript with multiple fallback options"""
     transcript = None
     error_messages = []
-
-    # Method 1: YouTube Transcript API
+    
+    # Method 1: YouTube Transcript API with retry
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        try:
-            transcript = transcript_list.find_transcript(['en']).fetch()
-        except NoTranscriptFound:
-            try:
-                transcript = transcript_list.find_manually_created_transcript().fetch()
-            except NoTranscriptFound:
-                transcript = transcript_list.find_generated_transcript().fetch()
+        transcript = get_transcript_with_retry(
+            YouTubeTranscriptApi.get_transcript,
+            video_id,
+            languages=['en']
+        )
     except Exception as e:
         error_messages.append(f"Method 1 failed: {str(e)}")
 
-    # Method 2: Direct YouTube Transcript API
-    if not transcript:
-        try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
-        except Exception as e:
-            error_messages.append(f"Method 2 failed: {str(e)}")
-
-    # Method 3: Pytube
+    # Method 2: Pytube
     if not transcript:
         try:
             yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-            
-            # Try to get English captions
-            caption = None
-            if 'en' in yt.captions:
-                caption = yt.captions['en']
-            elif 'a.en' in yt.captions:
-                caption = yt.captions['a.en']
-            elif yt.captions:
-                # Get first available caption
-                caption = list(yt.captions.values())[0]
-            
-            if caption:
-                # Convert to transcript format
-                transcript_text = caption.generate_srt_captions()
-                lines = transcript_text.split('\n\n')
-                transcript = []
+            if yt.captions:
+                caption = None
+                if 'en' in yt.captions:
+                    caption = yt.captions['en']
+                elif 'a.en' in yt.captions:
+                    caption = yt.captions['a.en']
+                elif yt.captions:
+                    caption = list(yt.captions.values())[0]
                 
-                for line in lines:
-                    if not line.strip():
-                        continue
-                    parts = line.split('\n')
-                    if len(parts) >= 3:
-                        text = ' '.join(parts[2:])
-                        transcript.append({
-                            'text': text,
-                            'start': 0,
-                            'duration': 0
-                        })
-            else:
-                error_messages.append("No captions available in the video")
+                if caption:
+                    transcript_text = caption.generate_srt_captions()
+                    lines = transcript_text.split('\n\n')
+                    transcript = []
+                    for line in lines:
+                        if not line.strip():
+                            continue
+                        parts = line.split('\n')
+                        if len(parts) >= 3:
+                            text = ' '.join(parts[2:])
+                            transcript.append({
+                                'text': text,
+                                'start': 0,
+                                'duration': 0
+                            })
+        except Exception as e:
+            error_messages.append(f"Method 2 failed: {str(e)}")
+
+    # Method 3: yt-dlp
+    if not transcript:
+        try:
+            transcript = get_transcript_yt_dlp(video_id)
         except Exception as e:
             error_messages.append(f"Method 3 failed: {str(e)}")
 

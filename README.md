@@ -7,12 +7,16 @@ An AI-powered application that generates summaries of YouTube videos and enables
 Experience the YouTube Video Summarizer in action: [https://aiafterdark-youtube-summarizer.streamlit.app/](https://aiafterdark-youtube-summarizer.streamlit.app/)
 
 ## Features
-- YouTube video transcript extraction
+- Robust YouTube video transcript extraction with multiple fallback methods:
+  - YouTube Transcript API (primary)
+  - Pytube captions
+  - yt-dlp caption extraction
 - AI-powered content summarization
 - Interactive Q&A about video content
 - Support for both cloud and local AI models
 - Adjustable summary detail levels
 - Clean, responsive UI
+- Comprehensive error handling and reporting
 
 ## Prerequisites
 - Python 3.11+
