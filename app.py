@@ -28,33 +28,58 @@ def openrouter_completion(messages):
             "X-Title": "YouTube Summarizer App"
         }
         
+        payload = {
+            "model": "meta-llama/llama-3.2-3b-instruct:free",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 1024,
+            "top_p": 0.8,
+            "stream": False
+        }
+        
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
-            json={
-                "model": "meta-llama/llama-3.2-3b-instruct:free",
-                "messages": messages,
-                "timeout": 30
-            },
-            timeout=30
+            json=payload,
+            timeout=60  # Increased timeout
         )
         
         # Debug log
         st.write("Received response from OpenRouter")
         
-        response.raise_for_status()
-        result = response.json()
-        
-        if not result.get('choices', [{}])[0].get('message', {}).get('content'):
-            st.error("Empty response from OpenRouter")
+        if response.status_code != 200:
+            error_msg = f"OpenRouter API returned status code {response.status_code}"
+            try:
+                error_data = response.json()
+                if 'error' in error_data:
+                    error_msg += f": {error_data['error']}"
+            except:
+                pass
+            st.error(error_msg)
             return None
             
-        return result['choices'][0]['message']['content']
+        result = response.json()
+        
+        # Debug the API response
+        if 'choices' not in result or not result['choices']:
+            st.error(f"Unexpected API response format: {json.dumps(result, indent=2)}")
+            return None
+            
+        content = result.get('choices', [{}])[0].get('message', {}).get('content')
+        if not content:
+            st.error("Empty content in OpenRouter response")
+            return None
+            
+        return content
+        
     except Timeout:
-        st.error("OpenRouter request timed out. Please try again.")
+        st.error("OpenRouter request timed out after 60 seconds. Please try again.")
         return None
     except RequestException as e:
         st.error(f"OpenRouter API Error: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error while calling OpenRouter: {str(e)}")
         return None
 
 def get_video_info(video_id):
@@ -198,20 +223,22 @@ def process_chunks_with_rate_limit(chunks, system_prompt):
             
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": chunk}
+                {"role": "user", "content": f"Please summarize this video transcript section:\n\n{chunk}"}
             ]
             
+            # Add delay between requests to respect rate limits
+            if i > 0:
+                time.sleep(2)  # Increased delay between requests
+                
             summary = openrouter_completion(messages)
             if not summary:
-                st.error(f"Failed to process chunk {i+1}")
+                st.error(f"Failed to process chunk {i+1}. Please try again with a smaller chunk size.")
                 return None
             
             summaries.append(summary)
             # Show chunk summary
             with st.expander(f"Chunk {i+1} Summary"):
                 st.markdown(summary)
-            
-            time.sleep(1)  # Rate limiting
         
         progress_bar.progress(1.0)
         status_text.text("All chunks processed successfully!")
