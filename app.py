@@ -117,28 +117,41 @@ def get_video_info(video_id):
             st.write("Fetching transcript...")
             
             # Get transcript
-            transcript = []
-            if 'subtitles' in info and info['subtitles'].get('en'):
-                # Try to get manual subtitles first
-                transcript_url = info['subtitles']['en'][0]['url']
-                response = requests.get(transcript_url)
-                if response.status_code == 200:
-                    transcript = process_transcript(response.text)
+            transcript = None
             
-            if not transcript and 'automatic_captions' in info and info['automatic_captions'].get('en'):
-                # Fall back to automatic captions if no manual subtitles
-                transcript_url = info['automatic_captions']['en'][0]['url']
-                response = requests.get(transcript_url)
-                if response.status_code == 200:
-                    transcript = process_transcript(response.text)
+            # Try to get manual subtitles first
+            if info.get('subtitles') and info['subtitles'].get('en'):
+                for fmt in info['subtitles']['en']:
+                    if fmt.get('ext') == 'json3':
+                        response = requests.get(fmt['url'])
+                        if response.status_code == 200:
+                            try:
+                                json_data = response.json()
+                                transcript = process_json_transcript(json_data)
+                                break
+                            except:
+                                continue
             
-            transcript_text = ' '.join(transcript) if transcript else ''
+            # Fall back to automatic captions if no manual subtitles
+            if not transcript and info.get('automatic_captions') and info['automatic_captions'].get('en'):
+                for fmt in info['automatic_captions']['en']:
+                    if fmt.get('ext') == 'json3':
+                        response = requests.get(fmt['url'])
+                        if response.status_code == 200:
+                            try:
+                                json_data = response.json()
+                                transcript = process_json_transcript(json_data)
+                                break
+                            except:
+                                continue
             
-            # Verify transcript content
-            if not transcript_text.strip():
+            if not transcript:
                 st.error("No transcript content found")
                 return video_details, None
                 
+            # Join transcript parts with proper spacing
+            transcript_text = ' '.join(transcript)
+            
             # Debug log
             st.write(f"Transcript length: {len(transcript_text)} characters")
             
@@ -147,37 +160,53 @@ def get_video_info(video_id):
         st.error(f"Error fetching video information: {str(e)}")
         return None, None
 
-def process_transcript(transcript_text):
-    """Process the transcript text into a clean format"""
-    # Remove XML/HTML tags and metadata
-    transcript_text = re.sub(r'<[^>]+>', '', transcript_text)
-    transcript_text = re.sub(r'\{[^}]+\}', '', transcript_text)
-    
-    # Split into lines and process
-    lines = transcript_text.split('\n')
+def process_json_transcript(json_data):
+    """Process JSON format transcript from YouTube"""
     transcript = []
-    current_text = ''
     
-    for line in lines:
-        # Skip empty lines, timing info, and metadata
-        if (line.strip() and 
-            not line[0].isdigit() and 
-            '-->' not in line and 
-            'WEBVTT' not in line and
-            'Kind:' not in line and
-            'Language:' not in line and
-            'Style:' not in line):
-            # Clean the line of any remaining metadata-like content
-            cleaned_line = re.sub(r'\[[^\]]+\]', '', line.strip())
-            cleaned_line = re.sub(r'\([^)]+\)', '', cleaned_line)
-            if cleaned_line:
-                current_text += ' ' + cleaned_line
-        elif current_text:
-            transcript.append(current_text.strip())
-            current_text = ''
+    # Handle different JSON formats
+    if isinstance(json_data, dict) and 'events' in json_data:
+        # YouTube json3 format
+        for event in json_data['events']:
+            if 'segs' in event:
+                line_parts = []
+                for seg in event['segs']:
+                    if 'utf8' in seg:
+                        text = seg['utf8'].strip()
+                        if text and not text.startswith('[') and not text.startswith('('):
+                            line_parts.append(text)
+                if line_parts:
+                    transcript.append(' '.join(line_parts))
+    elif isinstance(json_data, list):
+        # Alternative format
+        for item in json_data:
+            if 'text' in item:
+                text = item['text'].strip()
+                if text and not text.startswith('[') and not text.startswith('('):
+                    transcript.append(text)
     
-    if current_text:
-        transcript.append(current_text.strip())
+    return transcript
+
+def process_transcript(transcript_text):
+    """Process plain text transcript into a clean format"""
+    if not transcript_text:
+        return []
+        
+    # Remove XML/HTML tags
+    transcript_text = re.sub(r'<[^>]+>', '', transcript_text)
+    
+    # Remove metadata markers
+    transcript_text = re.sub(r'\[[^\]]+\]', '', transcript_text)
+    transcript_text = re.sub(r'\([^)]+\)', '', transcript_text)
+    
+    # Split into sentences and clean
+    sentences = re.split(r'[.!?]+', transcript_text)
+    transcript = []
+    
+    for sentence in sentences:
+        cleaned = sentence.strip()
+        if cleaned and not cleaned.isdigit() and '-->' not in cleaned:
+            transcript.append(cleaned)
     
     return transcript
 
