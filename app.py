@@ -1,180 +1,189 @@
 import streamlit as st
-import os
-from openai import OpenAI
-from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
-from pytube import YouTube
 import re
 from dotenv import load_dotenv
 import time
 from tenacity import retry, stop_after_attempt, wait_exponential
 import requests
-from bs4 import BeautifulSoup
 import yt_dlp
+import json
+from requests.exceptions import Timeout, RequestException
+import os
+import openai
 
 # Load environment variables
 load_dotenv()
 
-def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10)
+)
+def ollama_completion(messages, model="artifish/llama3.2-uncensored:latest"):
     try:
-        # Get API key from environment variable or Streamlit secrets
-        api_key = os.getenv('OPENROUTER_API_KEY') or st.secrets['OPENROUTER_API_KEY']
+        formatted_messages = [
+            {
+                "role": msg["role"],
+                "content": msg["content"]
+            } for msg in messages
+        ]
         
-        client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
-        )
-
-        completion = client.chat.completions.create(
-            extra_headers={
-                "HTTP-Referer": "https://youtube-summarizer.streamlit.app",
-                "X-Title": "YouTube Summarizer by AI Afterdark",
+        # Debug log
+        st.write("Sending request to Ollama...")
+        
+        response = requests.post(
+            'http://localhost:11434/api/chat',
+            json={
+                "model": model,
+                "messages": formatted_messages,
+                "stream": False
             },
-            model=model,
-            messages=messages
+            timeout=30  # Add timeout
         )
         
-        return completion.choices[0].message.content
+        # Debug log
+        st.write("Received response from Ollama")
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        if not result.get('message', {}).get('content'):
+            st.error("Empty response from Ollama")
+            return None
+            
+        return result['message']['content']
+    except Timeout:
+        st.error("Ollama request timed out. Please try again.")
+        return None
     except Exception as e:
-        st.error(f"OpenRouter API Error: {str(e)}")
+        st.error(f"Ollama API Error: {str(e)}")
         return None
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry_error_callback=lambda retry_state: None
+    wait=wait_exponential(multiplier=1, min=4, max=10)
 )
-def openrouter_completion_with_retry(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
-    return openrouter_completion(messages, model)
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-def get_transcript_with_retry(func, *args, **kwargs):
-    return func(*args, **kwargs)
-
-def get_transcript_yt_dlp(video_id):
-    """Get transcript using yt-dlp"""
+def openrouter_completion(messages, model="openai/gpt-3.5-turbo"):
     try:
-        ydl_opts = {
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': ['en'],
-            'skip_download': True,
-            'quiet': True,
-            'no_warnings': True
+        # Debug log
+        st.write(f"Sending request to OpenRouter using {model}...")
+        
+        headers = {
+            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+            "HTTP-Referer": "https://github.com/yourusername/youtube-summarizer-app",  # Replace with your repo
+            "X-Title": "YouTube Summarizer App"
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                if 'subtitles' in info and info['subtitles']:
-                    # Process subtitles
-                    subtitles = info['subtitles'].get('en', [])
-                    if subtitles:
-                        return [{'text': sub['text'], 'start': 0, 'duration': 0} for sub in subtitles]
-                elif 'automatic_captions' in info and info['automatic_captions']:
-                    # Process automatic captions
-                    auto_caps = info['automatic_captions'].get('en', [])
-                    if auto_caps:
-                        return [{'text': cap['text'], 'start': 0, 'duration': 0} for cap in auto_caps]
-            except yt_dlp.utils.DownloadError:
-                return None
-    except Exception:
-        return None
-    return None
-
-def get_transcript(video_id):
-    """Get transcript with enhanced error handling and fallback options"""
-    transcript = None
-    error_messages = []
-    
-    # Method 1: yt-dlp (most reliable)
-    try:
-        transcript = get_transcript_yt_dlp(video_id)
-        if transcript:
-            return transcript
-    except Exception as e:
-        error_messages.append(f"yt-dlp method failed: {str(e)}")
-
-    # Method 2: YouTube Transcript API
-    try:
-        transcript = get_transcript_with_retry(
-            YouTubeTranscriptApi.get_transcript,
-            video_id,
-            languages=['en']
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": model,
+                "messages": messages,
+                "timeout": 30
+            },
+            timeout=30
         )
-        if transcript:
-            return transcript
-    except Exception as e:
-        error_messages.append(f"YouTube Transcript API failed: {str(e)}")
-
-    # Method 3: Pytube (last resort)
-    try:
-        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-        if yt.captions:
-            caption = None
-            # Try english captions first
-            if 'en' in yt.captions:
-                caption = yt.captions['en']
-            elif 'a.en' in yt.captions:
-                caption = yt.captions['a.en']
-            elif yt.captions:
-                caption = list(yt.captions.values())[0]
+        
+        # Debug log
+        st.write("Received response from OpenRouter")
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        if not result.get('choices', [{}])[0].get('message', {}).get('content'):
+            st.error("Empty response from OpenRouter")
+            return None
             
-            if caption:
-                transcript_text = caption.generate_srt_captions()
-                transcript = []
-                for line in transcript_text.split('\n\n'):
-                    if not line.strip():
-                        continue
-                    parts = line.split('\n')
-                    if len(parts) >= 3:
-                        text = ' '.join(parts[2:])
-                        transcript.append({
-                            'text': text,
-                            'start': 0,
-                            'duration': 0
-                        })
-                if transcript:
-                    return transcript
+        return result['choices'][0]['message']['content']
+    except Timeout:
+        st.error("OpenRouter request timed out. Please try again.")
+        return None
+    except RequestException as e:
+        st.error(f"OpenRouter API Error: {str(e)}")
+        return None
     except Exception as e:
-        error_messages.append(f"Pytube method failed: {str(e)}")
+        st.error(f"Unexpected error: {str(e)}")
+        return None
 
-    # If all methods fail
-    error_message = " | ".join(error_messages) if error_messages else "No available transcripts found"
-    st.error("Could not retrieve transcript. Please try another video.")
-    st.error(f"Details: {error_message}")
-    return None
+def get_video_info(video_id):
+    """Get video information and transcript using yt-dlp"""
+    ydl_opts = {
+        'writesubtitles': True,
+        'writeautomaticsub': True,
+        'subtitleslangs': ['en'],
+        'skip_download': True,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            
+            # Debug log
+            st.write("Fetching video info...")
+            
+            info = ydl.extract_info(video_url, download=False)
+            
+            # Get video details
+            video_details = {
+                'title': info.get('title', ''),
+                'description': info.get('description', ''),
+                'duration': info.get('duration', 0),
+                'view_count': info.get('view_count', 0),
+                'uploader': info.get('uploader', ''),
+            }
+            
+            # Debug log
+            st.write("Fetching transcript...")
+            
+            # Get transcript
+            transcript = []
+            if 'subtitles' in info and info['subtitles'].get('en'):
+                # Try to get manual subtitles first
+                transcript_url = info['subtitles']['en'][0]['url']
+                response = requests.get(transcript_url)
+                if response.status_code == 200:
+                    transcript = process_transcript(response.text)
+            
+            if not transcript and 'automatic_captions' in info and info['automatic_captions'].get('en'):
+                # Fall back to automatic captions if no manual subtitles
+                transcript_url = info['automatic_captions']['en'][0]['url']
+                response = requests.get(transcript_url)
+                if response.status_code == 200:
+                    transcript = process_transcript(response.text)
+            
+            transcript_text = ' '.join(transcript) if transcript else ''
+            
+            # Verify transcript content
+            if not transcript_text.strip():
+                st.error("No transcript content found")
+                return video_details, None
+                
+            # Debug log
+            st.write(f"Transcript length: {len(transcript_text)} characters")
+            
+            return video_details, transcript_text
+    except Exception as e:
+        st.error(f"Error fetching video information: {str(e)}")
+        return None, None
 
-def process_chunks_with_rate_limit(chunks, system_prompt):
-    """Process chunks with rate limit handling"""
-    summaries = []
-    total_chunks = len(chunks)
+def process_transcript(transcript_text):
+    """Process the transcript text into a clean format"""
+    lines = transcript_text.split('\n')
+    transcript = []
+    current_text = ''
     
-    # Create a progress bar
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    for line in lines:
+        if line.strip() and not line[0].isdigit() and '-->' not in line:
+            current_text += ' ' + line.strip()
+        elif current_text:
+            transcript.append(current_text.strip())
+            current_text = ''
     
-    for i, chunk in enumerate(chunks, 1):
-        status_text.text(f"Processing chunk {i} of {total_chunks}...")
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Please provide a detailed summary of this video transcript part: {chunk}"}
-        ]
-        
-        summary = openrouter_completion_with_retry(messages)
-        if summary:
-            summaries.append(summary)
-        
-        # Update progress bar
-        progress_bar.progress(i / total_chunks)
-        
-        # Add a small delay between chunks to avoid rate limits
-        if i < total_chunks:
-            time.sleep(2)  # 2-second delay between chunks
+    if current_text:
+        transcript.append(current_text.strip())
     
-    progress_bar.empty()
-    status_text.empty()
-    return summaries
+    return transcript
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
@@ -197,13 +206,60 @@ def chunk_text(text, chunk_size):
     
     return chunks
 
+def process_chunks_with_rate_limit(chunks, system_prompt):
+    """Process chunks with rate limit handling and progress tracking"""
+    summaries = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        for i, chunk in enumerate(chunks):
+            status_text.text(f"Processing chunk {i+1}/{len(chunks)}")
+            progress_bar.progress((i) / len(chunks))
+            
+            # Show current chunk being processed
+            with st.expander(f"Processing chunk {i+1}/{len(chunks)}"):
+                st.text(chunk[:200] + "...")
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": chunk}
+            ]
+            
+            # Try OpenRouter first, fall back to Ollama if it fails
+            summary = openrouter_completion(messages)
+            if not summary:
+                st.warning("OpenRouter request failed, falling back to Ollama...")
+                summary = ollama_completion(messages)
+            
+            if summary:
+                summaries.append(summary)
+                # Show chunk summary
+                with st.expander(f"Chunk {i+1} Summary"):
+                    st.markdown(summary)
+            else:
+                st.error(f"Failed to process chunk {i+1}")
+                return None
+            
+            time.sleep(1)  # Rate limiting
+        
+        progress_bar.progress(1.0)
+        status_text.text("All chunks processed successfully!")
+        return summaries
+    except Exception as e:
+        st.error(f"Error processing chunks: {str(e)}")
+        return None
+    finally:
+        progress_bar.empty()
+        status_text.empty()
+
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats"""
     patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',  # Standard and shortened
-        r'(?:youtu\.be\/|youtube\.com\/shorts\/)([0-9A-Za-z_-]{11})',  # youtu.be and shorts
-        r'(?:embed\/)([0-9A-Za-z_-]{11})',  # Embedded videos
-        r'^([0-9A-Za-z_-]{11})$'  # Direct video ID
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
+        r'(?:youtu\.be\/|youtube\.com\/shorts\/)([0-9A-Za-z_-]{11})',
+        r'(?:embed\/)([0-9A-Za-z_-]{11})',
+        r'^([0-9A-Za-z_-]{11})$'
     ]
     
     if not url:
@@ -239,13 +295,14 @@ def main():
         st.session_state["current_url"] = ""
     if "current_summary" not in st.session_state:
         st.session_state["current_summary"] = ""
+    if "video_details" not in st.session_state:
+        st.session_state["video_details"] = None
 
     # Main content area
     col1, col2 = st.columns([0.6, 0.4])
 
     with col1:
         st.markdown("### Video Summary")
-        # Constrain the input width to match column
         with st.container():
             video_url = st.text_input("Enter YouTube Video URL", placeholder="https://www.youtube.com/watch?v=...")
         
@@ -253,11 +310,11 @@ def main():
         if video_url != st.session_state["current_url"]:
             st.session_state["messages"] = []
             st.session_state["current_url"] = video_url
+            st.session_state["video_details"] = None
         
         if video_url:
             video_id = extract_video_id(video_url)
             if video_id:
-                # Create a container for video that fills the column width
                 video_container = st.container()
                 with video_container:
                     st.markdown(
@@ -270,7 +327,6 @@ def main():
                         unsafe_allow_html=True
                     )
         
-        # Chunking control in a container to match width
         with st.container():
             chunk_size = st.slider(
                 "Summary Detail Level",
@@ -286,23 +342,34 @@ def main():
                 st.error("Please enter a valid YouTube URL")
             else:
                 try:
-                    with st.spinner("Fetching video transcript..."):
+                    with st.spinner("Fetching video information..."):
                         video_id = extract_video_id(video_url)
                         if not video_id:
                             st.error("Invalid YouTube URL")
                             return
                         
-                        transcript = get_transcript(video_id)
-                        if not transcript:
+                        video_details, transcript_text = get_video_info(video_id)
+                        if not video_details:
+                            st.error("Could not fetch video information")
+                            return
+                            
+                        if not transcript_text:
+                            st.error("Could not fetch transcript")
                             return
                         
-                        text = " ".join([entry["text"] for entry in transcript])
-                        if not text.strip():
-                            st.error("Retrieved transcript is empty")
-                            return
+                        st.session_state["video_details"] = video_details
+                        
+                        # Show transcript preview
+                        with st.expander("View transcript"):
+                            st.text(transcript_text[:1000] + "...")
                         
                         # Split text into chunks
-                        chunks = chunk_text(text, chunk_size)
+                        chunks = chunk_text(transcript_text, chunk_size)
+                        if not chunks:
+                            st.error("Could not split transcript into chunks")
+                            return
+                            
+                        st.write(f"Split transcript into {len(chunks)} chunks")
                         
                     with st.spinner(f"Generating summary from {len(chunks)} chunks..."):
                         # Process chunks with rate limit handling
@@ -313,31 +380,50 @@ def main():
                             and important details."""
                         )
                         
+                        if not chunk_summaries:
+                            st.error("Failed to generate chunk summaries")
+                            return
+                        
                         # Generate final summary if we have chunk summaries
-                        if chunk_summaries:
-                            final_summary_prompt = "\n\n".join(chunk_summaries)
-                            messages = [
-                                {"role": "system", "content": """You are a professional content summarizer. Create a cohesive, 
-                                well-structured final summary from these chunk summaries. Format the output in markdown with 
-                                clear sections. Focus on maintaining narrative flow and connecting ideas across chunks."""},
-                                {"role": "user", "content": f"Create a final summary from these chunk summaries:\n\n{final_summary_prompt}"}
-                            ]
-                            
-                            final_summary = openrouter_completion_with_retry(messages)
-                            if final_summary:
-                                st.session_state["current_summary"] = final_summary
+                        final_summary_prompt = "\n\n".join(chunk_summaries)
+                        messages = [
+                            {"role": "system", "content": """You are a professional content summarizer. Create a cohesive, 
+                            well-structured final summary from these chunk summaries. Format the output in markdown with 
+                            clear sections. Focus on maintaining narrative flow and connecting ideas across chunks."""},
+                            {"role": "user", "content": f"Create a final summary from these chunk summaries:\n\n{final_summary_prompt}"}
+                        ]
+                        
+                        final_summary = openrouter_completion(messages)
+                        if not final_summary:
+                            st.warning("OpenRouter request failed, falling back to Ollama...")
+                            final_summary = ollama_completion(messages)
+                        if final_summary:
+                            st.session_state["current_summary"] = final_summary
+                        else:
+                            st.error("Failed to generate final summary")
                 except Exception as e:
                     st.error(f"Error processing video: {str(e)}")
                 
-        # Display summary in a container that fills the column width
-        if "current_summary" in st.session_state and st.session_state["current_summary"]:
+        # Display video details and summary
+        if st.session_state.get("video_details"):
             with st.container():
-                st.markdown("### Current Summary")
+                st.markdown("### Video Details")
+                details = st.session_state["video_details"]
+                st.markdown(f"""
+                **Title:** {details['title']}
+                **Uploader:** {details['uploader']}
+                **Duration:** {details['duration']} seconds
+                **Views:** {details['view_count']:,}
+                """)
+        
+        if st.session_state.get("current_summary"):
+            with st.container():
+                st.markdown("### Summary")
                 st.markdown(st.session_state["current_summary"])
 
     with col2:
         st.markdown("### Chat with Video Content")
-        if "current_summary" in st.session_state and st.session_state["current_summary"]:
+        if st.session_state.get("current_summary"):
             chat_container = st.container()
             with chat_container:
                 # Display chat messages
@@ -360,9 +446,15 @@ def main():
                                 Here's the video summary to reference:\n\n{st.session_state["current_summary"]}"""},
                                 *st.session_state.messages,
                             ]
-                            response = openrouter_completion_with_retry(messages)
-                            st.session_state.messages.append({"role": "assistant", "content": response})
-                            st.markdown(response)
+                            response = openrouter_completion(messages)
+                            if not response:
+                                st.warning("OpenRouter request failed, falling back to Ollama...")
+                                response = ollama_completion(messages)
+                            if response:
+                                st.session_state.messages.append({"role": "assistant", "content": response})
+                                st.markdown(response)
+                            else:
+                                st.error("Failed to generate response")
         else:
             st.info("Generate a video summary first to start chatting!")
 
@@ -370,6 +462,7 @@ def main():
     if st.button("Reset Chat"):
         st.session_state["messages"] = []
         st.session_state["current_summary"] = ""
+        st.session_state["video_details"] = None
 
 if __name__ == "__main__":
     main()
