@@ -479,7 +479,7 @@ def main():
 
     with col2:
         st.markdown("### Chat with Video Content")
-        if st.session_state.get("current_summary"):
+        if "current_summary" in st.session_state and st.session_state["current_summary"]:
             chat_container = st.container()
             with chat_container:
                 # Display chat messages
@@ -498,16 +498,23 @@ def main():
                     with st.chat_message("assistant"):
                         with st.spinner("Thinking..."):
                             messages = [
-                                {"role": "system", "content": f"""You are a helpful AI assistant that answers questions about a video based on its summary. 
-                                Here's the video summary to reference:\n\n{st.session_state["current_summary"]}"""},
-                                *st.session_state.messages,
+                                {"role": "system", "content": f"""You are a helpful AI assistant that answers questions about a video based STRICTLY on its summary.
+                                You must ONLY use information from this summary to answer questions. If the information needed to answer the question
+                                is not in the summary, say so clearly. DO NOT make up or infer information that is not explicitly stated in the summary.
+                                
+                                Here is the video summary to reference:
+                                {st.session_state["current_summary"]}"""},
+                                {"role": "user", "content": "What information can I find in this summary?"},
+                                {"role": "assistant", "content": "I can help you with questions about the specific content mentioned in the summary above. I'll only reference information that's explicitly stated in it. If you ask about something not covered in the summary, I'll let you know that I don't have that information."},
+                                {"role": "user", "content": prompt}
                             ]
+                            
                             response = openrouter_completion(messages)
-                            if not response:
+                            if response:
+                                st.session_state.messages.append({"role": "assistant", "content": response})
+                                st.markdown(response)
+                            else:
                                 st.error("Failed to generate response")
-                                return
-                            st.session_state.messages.append({"role": "assistant", "content": response})
-                            st.markdown(response)
         else:
             st.info("Generate a video summary first to start chatting!")
 
