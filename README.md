@@ -1,6 +1,6 @@
 # YouTube Video Summarizer
 Created by AI Afterdark - Building Innovation with AI at Night
-An AI-powered application that generates summaries of YouTube videos and enables interactive conversations about their content. This tool supports both cloud deployment (using OpenRouter) and local deployment (using Ollama).
+An AI-powered application that generates summaries of YouTube videos and enables interactive conversations about their content.
 <img src="img/YoutubeVideoSummarizer.gif" alt="Demo" autoplay loop>
 
 ## Live Demo
@@ -11,27 +11,27 @@ Experience the YouTube Video Summarizer in action: [https://aiafterdark-youtube-
   - YouTube Transcript API (primary)
   - Pytube captions
   - yt-dlp caption extraction
-- AI-powered content summarization
+- AI-powered content summarization using OpenRouter's LLMs
 - Interactive Q&A about video content
-- Support for both cloud and local AI models
 - Adjustable summary detail levels
 - Clean, responsive UI
 - Comprehensive error handling and reporting
 
-## Prerequisites
+## Cloud Deployment (Default)
+### Prerequisites
 - Python 3.11+
 - pip (Python package manager)
 - Git
-- Ollama (optional, for local deployment)
+- OpenRouter API key
 
-## Quick Start
-### 1. Clone the Repository
+### Quick Start
+1. Clone the Repository
 ```bash
 git clone https://github.com/AIAfterDark/youtube-summarizer-app.git
 cd youtube-summarizer-app
 ```
 
-### 2. Set Up Virtual Environment
+2. Set Up Virtual Environment
 ```bash
 python -m venv venv
 # Windows
@@ -40,79 +40,81 @@ venv\Scripts\activate
 source venv/bin/activate
 ```
 
-### 3. Install Dependencies
+3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment
-#### Cloud Deployment (OpenRouter)
-1. Create a `.env` file in the root directory
-2. Add your OpenRouter API key:
+4. Configure Environment
+Create a `.env` file in the root directory and add your OpenRouter API key:
 ```env
 OPENROUTER_API_KEY=your_api_key_here
 ```
 
-#### Local Deployment (Ollama)
-1. Install Ollama from [ollama.ai](https://ollama.ai)
-2. Pull your preferred model:
-```bash
-ollama pull llama2
-```
-
-### 5. Run the Application
+5. Run the Application
 ```bash
 streamlit run app.py
 ```
 
-## Using Local Models with Ollama
-To use Ollama locally, modify the `openrouter_completion` function in `app.py`:
-```python
-import requests
-def ollama_completion(messages, model="llama2"):
-    try:
-        response = requests.post(
-            'http://localhost:11434/api/chat',
-            json={
-                "model": model,
-                "messages": messages
-            }
-        )
-        return response.json()['message']['content']
-    except Exception as e:
-        st.error(f"Ollama API Error: {str(e)}")
-        return None
-# Replace OpenRouter function calls with Ollama
-def openrouter_completion(messages, model="llama2"):
-    return ollama_completion(messages, model)
+## Local Deployment (Ollama)
+The app-local.py version allows you to run the summarizer using Ollama on your local machine, which is free and doesn't require an API key.
+
+### Prerequisites
+- All requirements from Cloud Deployment
+- Ollama installed on your machine
+
+### Setup Steps
+1. Install Ollama
+   - Download from [ollama.ai](https://ollama.ai)
+   - Follow the installation instructions for your OS
+   - Make sure Ollama is running in the background
+
+2. Pull Your Preferred Model
+```bash
+# Pull the default model (recommended)
+ollama pull llama2
+
+# Or pull other supported models
+ollama pull codellama
+ollama pull mistral
+ollama pull neural-chat
 ```
 
-## Configuration
-### Summary Detail Level
-- Short videos (<30 mins): 4000
-- Long content (1hr+): 7000+
+3. Run the Local Version
+```bash
+streamlit run app-local.py
+```
 
-### Available Models
-#### OpenRouter Models:
-- meta-llama/llama-2-13b-chat
-- anthropic/claude-2
-- openai/gpt-3.5-turbo
-
-#### Ollama Models:
-- llama2
+### Available Local Models
+The following models are tested and supported in app-local.py:
+- llama2 (default, recommended)
 - codellama
 - mistral
 - neural-chat
 
+### Configuration
+You can modify these settings in app-local.py:
+- Default model: Change `model="llama2"` in the `ollama_completion` function
+- API endpoint: Default is `http://localhost:11434/api/chat`
+- Timeout settings: Default is 30 seconds
+
+## Configuration
+### Summary Detail Level
+Adjust the chunk size based on video length:
+- Short videos (<30 mins): 4000
+- Long content (1hr+): 7000+
+
+### Cloud Models (app.py)
+The app uses OpenRouter's API to access various LLM models:
+- meta-llama/llama-2-13b-chat (default)
+- anthropic/claude-2
+- openai/gpt-3.5-turbo
+
 ## Contributing
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+We welcome contributions! Please feel free to submit a Pull Request.
 
 ## License
-This project is open source and available under the MIT License. Created by AI Afterdark - feel free to use and modify, but please credit us!
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Credits
 Created by Will at AI Afterdark
