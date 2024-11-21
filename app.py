@@ -61,7 +61,7 @@ def ollama_completion(messages, model="artifish/llama3.2-uncensored:latest"):
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10)
 )
-def openrouter_completion(messages, model="openai/gpt-3.5-turbo"):
+def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
     try:
         # Debug log
         st.write(f"Sending request to OpenRouter using {model}...")
