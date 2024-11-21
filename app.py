@@ -17,7 +17,7 @@ load_dotenv()
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10)
 )
-def ollama_completion(messages, model="artifish/llama3.2-uncensored:latest"):
+def ollama_completion(messages, model="llama3.2"):
     try:
         formatted_messages = [
             {
@@ -187,19 +187,25 @@ def process_transcript(transcript_text):
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
-    words = text.split()
+    # Calculate a more appropriate chunk size based on the input parameter
+    # This will help create fewer, larger chunks when chunk_size is increased
+    effective_chunk_size = chunk_size * 2  # Double the chunk size to reduce number of chunks
+    
+    # Split into sentences first to maintain context
+    sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks = []
     current_chunk = []
     current_size = 0
     
-    for word in words:
-        current_size += len(word) + 1  # +1 for space
-        if current_size > chunk_size:
+    for sentence in sentences:
+        sentence_size = len(sentence)
+        if current_size + sentence_size > effective_chunk_size and current_chunk:
             chunks.append(" ".join(current_chunk))
-            current_chunk = [word]
-            current_size = len(word)
+            current_chunk = [sentence]
+            current_size = sentence_size
         else:
-            current_chunk.append(word)
+            current_chunk.append(sentence)
+            current_size += sentence_size
     
     if current_chunk:
         chunks.append(" ".join(current_chunk))
