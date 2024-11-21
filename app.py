@@ -32,8 +32,10 @@ def openrouter_completion(messages):
             "model": "meta-llama/llama-3.2-3b-instruct:free",
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1024,
+            "max_tokens": 512,  # Reduced to ensure we stay within limits
             "top_p": 0.8,
+            "frequency_penalty": 0.3,
+            "presence_penalty": 0.3,
             "stream": False
         }
         
@@ -41,7 +43,7 @@ def openrouter_completion(messages):
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=60  # Increased timeout
+            timeout=30  # Reduced timeout since we're using smaller chunks
         )
         
         # Debug log
@@ -70,10 +72,10 @@ def openrouter_completion(messages):
             st.error("Empty content in OpenRouter response")
             return None
             
-        return content
+        return content.strip()
         
     except Timeout:
-        st.error("OpenRouter request timed out after 60 seconds. Please try again.")
+        st.error("OpenRouter request timed out. Please try again.")
         return None
     except RequestException as e:
         st.error(f"OpenRouter API Error: {str(e)}")
@@ -181,28 +183,55 @@ def process_transcript(transcript_text):
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
-    # Calculate a more appropriate chunk size based on the input parameter
-    # This will help create fewer, larger chunks when chunk_size is increased
-    effective_chunk_size = chunk_size * 2  # Double the chunk size to reduce number of chunks
+    # Normalize chunk size to ensure it's not too large
+    max_chunk_size = 1500  # Maximum size for reliable API processing
+    effective_chunk_size = min(chunk_size, max_chunk_size)
     
-    # Split into sentences first to maintain context
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Clean and prepare the text
+    text = re.sub(r'\s+', ' ', text).strip()  # Normalize whitespace
+    
+    # Split into sentences and normalize
+    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+    
     chunks = []
     current_chunk = []
     current_size = 0
     
     for sentence in sentences:
         sentence_size = len(sentence)
-        if current_size + sentence_size > effective_chunk_size and current_chunk:
-            chunks.append(" ".join(current_chunk))
+        
+        # If a single sentence is too long, split it into smaller parts
+        if sentence_size > effective_chunk_size:
+            words = sentence.split()
+            current_words = []
+            current_word_count = 0
+            
+            for word in words:
+                if current_word_count + len(word) > effective_chunk_size:
+                    if current_words:
+                        chunks.append(" ".join(current_words) + "...")
+                    current_words = [word]
+                    current_word_count = len(word)
+                else:
+                    current_words.append(word)
+                    current_word_count += len(word) + 1
+            
+            if current_words:
+                chunks.append(" ".join(current_words) + "...")
+        
+        # Normal sentence processing
+        elif current_size + sentence_size > effective_chunk_size:
+            if current_chunk:
+                chunks.append(" ".join(current_chunk) + ".")
             current_chunk = [sentence]
             current_size = sentence_size
         else:
             current_chunk.append(sentence)
             current_size += sentence_size
     
+    # Add any remaining content
     if current_chunk:
-        chunks.append(" ".join(current_chunk))
+        chunks.append(" ".join(current_chunk) + ".")
     
     return chunks
 
@@ -219,27 +248,38 @@ def process_chunks_with_rate_limit(chunks, system_prompt):
             
             # Show current chunk being processed
             with st.expander(f"Processing chunk {i+1}/{len(chunks)}"):
-                st.text(chunk[:200] + "...")
+                st.text(chunk[:100] + "..." if len(chunk) > 100 else chunk)
+            
+            prompt = f"""Please provide a clear and concise summary of this video transcript section. 
+Focus on the main points and key information:
+
+{chunk}
+
+Keep the summary focused and informative."""
             
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Please summarize this video transcript section:\n\n{chunk}"}
+                {"role": "user", "content": prompt}
             ]
             
             # Add delay between requests to respect rate limits
             if i > 0:
-                time.sleep(2)  # Increased delay between requests
+                time.sleep(3)  # Increased delay between requests
                 
             summary = openrouter_completion(messages)
             if not summary:
-                st.error(f"Failed to process chunk {i+1}. Please try again with a smaller chunk size.")
-                return None
+                st.error(f"Failed to process chunk {i+1}. Skipping to next chunk.")
+                continue
             
             summaries.append(summary)
             # Show chunk summary
             with st.expander(f"Chunk {i+1} Summary"):
                 st.markdown(summary)
         
+        if not summaries:
+            st.error("No summaries were generated. Please try again.")
+            return None
+            
         progress_bar.progress(1.0)
         status_text.text("All chunks processed successfully!")
         return summaries
