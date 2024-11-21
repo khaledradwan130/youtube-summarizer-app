@@ -183,28 +183,18 @@ def get_transcript_yt_dlp(video_id):
 def process_transcript(transcript):
     """Process transcript into a clean format"""
     if not transcript:
-        return []
-        
-    # Join transcript parts with proper spacing
-    transcript_text = ' '.join([sub['text'] for sub in transcript])
+        return ""
     
-    # Remove XML/HTML tags
-    transcript_text = re.sub(r'<[^>]+>', '', transcript_text)
+    # Extract text from transcript entries and join with spaces
+    text = ' '.join([entry.get('text', '') for entry in transcript])
     
-    # Remove metadata markers
-    transcript_text = re.sub(r'\[[^\]]+\]', '', transcript_text)
-    transcript_text = re.sub(r'\([^)]+\)', '', transcript_text)
+    # Clean the text
+    text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
+    text = re.sub(r'\[[^\]]+\]', '', text)  # Remove metadata markers
+    text = re.sub(r'\([^)]+\)', '', text)  # Remove parenthetical content
+    text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
     
-    # Split into sentences and clean
-    sentences = re.split(r'[.!?]+', transcript_text)
-    transcript = []
-    
-    for sentence in sentences:
-        cleaned = sentence.strip()
-        if cleaned and not cleaned.isdigit() and '-->' not in cleaned:
-            transcript.append(cleaned)
-    
-    return transcript
+    return text.strip()
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
@@ -404,7 +394,7 @@ def main():
                         
                         # Show transcript preview
                         with st.expander("View transcript"):
-                            st.text(transcript_text[:1000] + "...")
+                            st.text(transcript_text[:1000] + "..." if len(transcript_text) > 1000 else transcript_text)
                         
                         # Split text into chunks
                         chunks = chunk_text(transcript_text, chunk_size)
