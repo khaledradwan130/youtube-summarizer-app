@@ -334,6 +334,8 @@ def main():
         st.session_state["current_summary"] = ""
     if "video_details" not in st.session_state:
         st.session_state["video_details"] = None
+    if "chunk_summaries" not in st.session_state:
+        st.session_state["chunk_summaries"] = []
 
     # Main content area
     col1, col2 = st.columns([0.6, 0.4])
@@ -348,6 +350,7 @@ def main():
             st.session_state["messages"] = []
             st.session_state["current_url"] = video_url
             st.session_state["video_details"] = None
+            st.session_state["chunk_summaries"] = []
         
         if video_url:
             video_id = extract_video_id(video_url)
@@ -425,8 +428,22 @@ def main():
                             st.error("Failed to generate chunk summaries")
                             return
                         
+                        # Store chunk summaries in session state
+                        st.session_state["chunk_summaries"] = chunk_summaries
+                        
+                        # Display chunk summaries
+                        with st.expander("View Individual Chunk Summaries"):
+                            for i, summary in enumerate(chunk_summaries, 1):
+                                st.markdown(f"#### Chunk {i} Summary")
+                                st.markdown(summary)
+                                st.markdown("---")
+                        
                         # Generate final summary if we have chunk summaries
-                        final_summary_prompt = "\n\n".join(chunk_summaries)
+                        st.write("Generating final summary...")
+                        final_summary_prompt = f"""Here are the summaries of different parts of the video. Please create a cohesive final summary:
+
+{chr(10).join(f'Part {i+1}:{chr(10)}{summary}{chr(10)}---' for i, summary in enumerate(chunk_summaries))}"""
+                        
                         messages = [
                             {"role": "system", "content": """You are a professional content summarizer. Create a comprehensive summary of this video by combining the key points from all sections.
                             Your summary should:
@@ -440,7 +457,11 @@ def main():
                         ]
                         
                         final_summary = openrouter_completion(messages)
-                        if not final_summary:
+                        if final_summary:
+                            st.session_state["current_summary"] = final_summary
+                            st.markdown("### Final Summary")
+                            st.markdown(final_summary)
+                        else:
                             st.error("Failed to generate final summary")
                             return
                 except Exception as e:
@@ -502,6 +523,7 @@ def main():
         st.session_state["messages"] = []
         st.session_state["current_summary"] = ""
         st.session_state["video_details"] = None
+        st.session_state["chunk_summaries"] = []
 
 if __name__ == "__main__":
     main()
