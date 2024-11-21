@@ -8,6 +8,7 @@ import yt_dlp
 import json
 from requests.exceptions import Timeout, RequestException
 import os
+from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 
 # Load environment variables
 load_dotenv()
@@ -84,25 +85,54 @@ def openrouter_completion(messages):
         st.error(f"Unexpected error while calling OpenRouter: {str(e)}")
         return None
 
-def get_video_info(video_id):
-    """Get video information and transcript using yt-dlp"""
-    ydl_opts = {
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['en'],
-        'skip_download': True,
-        'quiet': True,
-        'no_warnings': True,
-    }
+def get_transcript(video_id):
+    """Get transcript with enhanced error handling and logging"""
+    transcript = None
+    error_messages = []
     
+    # Method 1: YouTube Transcript API (primary method)
     try:
+        st.info("Attempting to retrieve transcript using YouTube Transcript API...")
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+        if transcript:
+            st.success("Successfully retrieved transcript using YouTube Transcript API")
+            return transcript
+    except Exception as e:
+        error_msg = f"YouTube Transcript API failed: {str(e)}"
+        st.warning(error_msg)
+        error_messages.append(error_msg)
+
+    # Method 2: yt-dlp (fallback)
+    try:
+        st.info("Attempting to retrieve transcript using yt-dlp...")
+        transcript = get_transcript_yt_dlp(video_id)
+        if transcript:
+            st.success("Successfully retrieved transcript using yt-dlp")
+            return transcript
+    except Exception as e:
+        error_msg = f"yt-dlp method failed: {str(e)}"
+        st.warning(error_msg)
+        error_messages.append(error_msg)
+
+    # If all methods fail
+    error_message = " | ".join(error_messages) if error_messages else "No available transcripts found"
+    st.error("Could not retrieve transcript. Please try another video.")
+    st.error(f"Details: {error_message}")
+    return None
+
+def get_transcript_yt_dlp(video_id):
+    """Enhanced transcript retrieval using yt-dlp"""
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True
+        }
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            
-            # Debug log
-            st.write("Fetching video info...")
-            
-            info = ydl.extract_info(video_url, download=False)
+            info = ydl.extract_info(url, download=False)
             
             # Get video details
             video_details = {
@@ -113,85 +143,51 @@ def get_video_info(video_id):
                 'uploader': info.get('uploader', ''),
             }
             
-            # Debug log
-            st.write("Fetching transcript...")
+            st.session_state["video_details"] = video_details
             
-            # Get transcript
-            transcript = None
+            # Configure options for subtitles
+            ydl_opts.update({
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitleslangs': ['en'],
+                'skip_download': True,
+                'format': 'best'
+            })
             
-            # Try to get manual subtitles first
-            if info.get('subtitles') and info['subtitles'].get('en'):
-                for fmt in info['subtitles']['en']:
-                    if fmt.get('ext') == 'json3':
-                        response = requests.get(fmt['url'])
-                        if response.status_code == 200:
-                            try:
-                                json_data = response.json()
-                                transcript = process_json_transcript(json_data)
-                                break
-                            except:
-                                continue
-            
-            # Fall back to automatic captions if no manual subtitles
-            if not transcript and info.get('automatic_captions') and info['automatic_captions'].get('en'):
-                for fmt in info['automatic_captions']['en']:
-                    if fmt.get('ext') == 'json3':
-                        response = requests.get(fmt['url'])
-                        if response.status_code == 200:
-                            try:
-                                json_data = response.json()
-                                transcript = process_json_transcript(json_data)
-                                break
-                            except:
-                                continue
-            
-            if not transcript:
-                st.error("No transcript content found")
-                return video_details, None
+            # Try to get subtitles
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                result = ydl.extract_info(url, download=False)
                 
-            # Join transcript parts with proper spacing
-            transcript_text = ' '.join(transcript)
-            
-            # Debug log
-            st.write(f"Transcript length: {len(transcript_text)} characters")
-            
-            return video_details, transcript_text
+                # Check for manual subtitles
+                if result.get('subtitles') and result['subtitles'].get('en'):
+                    st.info("Found manual English subtitles")
+                    subs = result['subtitles']['en']
+                    if isinstance(subs, list):
+                        return [{'text': sub.get('text', ''), 'start': sub.get('start', 0), 'duration': sub.get('duration', 0)} 
+                               for sub in subs if sub.get('text')]
+                
+                # Check for automatic captions
+                if result.get('automatic_captions') and result['automatic_captions'].get('en'):
+                    st.info("Found automatic English captions")
+                    auto_caps = result['automatic_captions']['en']
+                    if isinstance(auto_caps, list):
+                        return [{'text': cap.get('text', ''), 'start': cap.get('start', 0), 'duration': cap.get('duration', 0)} 
+                               for cap in auto_caps if cap.get('text')]
+                    
     except Exception as e:
-        st.error(f"Error fetching video information: {str(e)}")
-        return None, None
-
-def process_json_transcript(json_data):
-    """Process JSON format transcript from YouTube"""
-    transcript = []
+        st.error(f"yt-dlp error: {str(e)}")
+        return None
     
-    # Handle different JSON formats
-    if isinstance(json_data, dict) and 'events' in json_data:
-        # YouTube json3 format
-        for event in json_data['events']:
-            if 'segs' in event:
-                line_parts = []
-                for seg in event['segs']:
-                    if 'utf8' in seg:
-                        text = seg['utf8'].strip()
-                        if text and not text.startswith('[') and not text.startswith('('):
-                            line_parts.append(text)
-                if line_parts:
-                    transcript.append(' '.join(line_parts))
-    elif isinstance(json_data, list):
-        # Alternative format
-        for item in json_data:
-            if 'text' in item:
-                text = item['text'].strip()
-                if text and not text.startswith('[') and not text.startswith('('):
-                    transcript.append(text)
-    
-    return transcript
+    return None
 
-def process_transcript(transcript_text):
-    """Process plain text transcript into a clean format"""
-    if not transcript_text:
+def process_transcript(transcript):
+    """Process transcript into a clean format"""
+    if not transcript:
         return []
         
+    # Join transcript parts with proper spacing
+    transcript_text = ' '.join([sub['text'] for sub in transcript])
+    
     # Remove XML/HTML tags
     transcript_text = re.sub(r'<[^>]+>', '', transcript_text)
     
@@ -212,14 +208,10 @@ def process_transcript(transcript_text):
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
-    # Normalize chunk size to ensure it's not too large
-    max_chunk_size = 1500  # Maximum size for reliable API processing
-    effective_chunk_size = min(chunk_size, max_chunk_size)
-    
     # Clean and prepare the text
-    text = re.sub(r'\s+', ' ', text).strip()  # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
     
-    # Split into sentences and normalize
+    # Split into sentences
     sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
     
     chunks = []
@@ -229,14 +221,14 @@ def chunk_text(text, chunk_size):
     for sentence in sentences:
         sentence_size = len(sentence)
         
-        # If a single sentence is too long, split it into smaller parts
-        if sentence_size > effective_chunk_size:
+        # If a single sentence is too long, split it
+        if sentence_size > chunk_size:
             words = sentence.split()
             current_words = []
             current_word_count = 0
             
             for word in words:
-                if current_word_count + len(word) > effective_chunk_size:
+                if current_word_count + len(word) > chunk_size:
                     if current_words:
                         chunks.append(" ".join(current_words) + "...")
                     current_words = [word]
@@ -249,7 +241,7 @@ def chunk_text(text, chunk_size):
                 chunks.append(" ".join(current_words) + "...")
         
         # Normal sentence processing
-        elif current_size + sentence_size > effective_chunk_size:
+        elif current_size + sentence_size > chunk_size:
             if current_chunk:
                 chunks.append(" ".join(current_chunk) + ".")
             current_chunk = [sentence]
@@ -267,57 +259,43 @@ def chunk_text(text, chunk_size):
 def process_chunks_with_rate_limit(chunks, system_prompt):
     """Process chunks with rate limit handling and progress tracking"""
     summaries = []
+    total_chunks = len(chunks)
+    
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    try:
-        for i, chunk in enumerate(chunks):
-            status_text.text(f"Processing chunk {i+1}/{len(chunks)}")
-            progress_bar.progress((i) / len(chunks))
-            
-            # Show current chunk being processed
-            with st.expander(f"Processing chunk {i+1}/{len(chunks)}"):
-                st.text(chunk[:100] + "..." if len(chunk) > 100 else chunk)
-            
-            prompt = f"""Please provide a clear and concise summary of this video transcript section. 
-Focus on the main points and key information:
-
-{chunk}
-
-Keep the summary focused and informative."""
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ]
-            
-            # Add delay between requests to respect rate limits
-            if i > 0:
-                time.sleep(3)  # Increased delay between requests
-                
-            summary = openrouter_completion(messages)
-            if not summary:
-                st.error(f"Failed to process chunk {i+1}. Skipping to next chunk.")
-                continue
-            
+    for i, chunk in enumerate(chunks, 1):
+        status_text.text(f"Processing chunk {i} of {total_chunks}...")
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Please provide a detailed summary of this video transcript part:\n\n{chunk}"}
+        ]
+        
+        # Show current chunk being processed
+        with st.expander(f"Processing chunk {i}/{total_chunks}"):
+            st.text(chunk[:200] + "..." if len(chunk) > 200 else chunk)
+        
+        summary = openrouter_completion(messages)
+        if summary:
             summaries.append(summary)
             # Show chunk summary
-            with st.expander(f"Chunk {i+1} Summary"):
+            with st.expander(f"Chunk {i} Summary"):
                 st.markdown(summary)
+        else:
+            st.error(f"Failed to process chunk {i}")
+            continue
         
-        if not summaries:
-            st.error("No summaries were generated. Please try again.")
-            return None
-            
-        progress_bar.progress(1.0)
-        status_text.text("All chunks processed successfully!")
-        return summaries
-    except Exception as e:
-        st.error(f"Error processing chunks: {str(e)}")
-        return None
-    finally:
-        progress_bar.empty()
-        status_text.empty()
+        progress_bar.progress(i / total_chunks)
+        
+        # Add a small delay between chunks
+        if i < total_chunks:
+            time.sleep(2)
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    return summaries
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats"""
@@ -417,16 +395,12 @@ def main():
                             st.error("Invalid YouTube URL")
                             return
                         
-                        video_details, transcript_text = get_video_info(video_id)
-                        if not video_details:
-                            st.error("Could not fetch video information")
-                            return
-                            
-                        if not transcript_text:
+                        transcript = get_transcript(video_id)
+                        if not transcript:
                             st.error("Could not fetch transcript")
                             return
                         
-                        st.session_state["video_details"] = video_details
+                        transcript_text = process_transcript(transcript)
                         
                         # Show transcript preview
                         with st.expander("View transcript"):
