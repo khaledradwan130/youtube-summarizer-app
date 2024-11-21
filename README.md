@@ -130,3 +130,113 @@ Built using:
 
 ---
 Built by AI Afterdark - Innovating with AI at Night
+
+# YouTube Video Summarizer
+
+An AI-powered Streamlit app that generates summaries of YouTube videos and allows you to chat with the content. Available in two versions: Cloud (OpenRouter) and Local (Ollama).
+
+## Features
+
+- YouTube video transcript extraction
+- Intelligent text chunking and processing
+- AI-powered summarization
+- Interactive chat with video content
+- Multiple transcript retrieval methods
+- Cloud and Local deployment options
+
+## Versions
+
+### Cloud Version (app.py)
+- Uses OpenRouter API for AI inference
+- Requires OpenRouter API key
+- Better for deployment and sharing
+- Uses meta-llama/llama-3.2-3b-instruct:free model
+
+### Local Version (app-local.py)
+- Uses Ollama for local AI inference
+- No API key required
+- Better for privacy and offline use
+- Supports multiple Ollama models
+
+## Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/youtube-summarizer-app.git
+cd youtube-summarizer-app
+```
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Setup based on version:
+
+### For Cloud Version (app.py):
+1. Get an API key from [OpenRouter](https://openrouter.ai/)
+2. Create a `.env` file:
+```bash
+OPENROUTER_API_KEY=your_api_key_here
+```
+3. Run the app:
+```bash
+streamlit run app.py
+```
+
+### For Local Version (app-local.py):
+1. Install Ollama from [ollama.ai](https://ollama.ai)
+2. Pull the Llama2 model:
+```bash
+ollama pull llama2
+```
+3. Start Ollama:
+```bash
+ollama serve
+```
+4. Run the app:
+```bash
+streamlit run app-local.py
+```
+
+## Usage
+
+1. Enter a YouTube URL
+2. Adjust the Summary Detail Level slider (1000-10000)
+3. Click "Generate Summary"
+4. View the generated summary
+5. Use the chat to ask questions about the video content
+
+## Features in Detail
+
+### Transcript Retrieval
+- Primary: YouTube Transcript API
+- Fallback: yt-dlp
+- Supports both manual and auto-generated captions
+
+### Text Processing
+- Smart chunking based on sentence boundaries
+- Context-aware summarization
+- Clean transcript formatting
+
+### Chat Interface
+- Context-aware responses
+- Strictly based on generated summary
+- Clear indication when information isn't available
+
+## Requirements
+
+- Python 3.7+
+- Streamlit
+- youtube-transcript-api
+- yt-dlp
+- For Cloud Version: OpenRouter API key
+- For Local Version: Ollama
+
+## Contributing
+
+Feel free to open issues or submit pull requests with improvements.
+
+## License
+
+MIT License - feel free to use this project as you wish.
