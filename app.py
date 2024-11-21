@@ -8,7 +8,6 @@ import yt_dlp
 import json
 from requests.exceptions import Timeout, RequestException
 import os
-import openai
 
 # Load environment variables
 load_dotenv()
@@ -17,58 +16,15 @@ load_dotenv()
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10)
 )
-def ollama_completion(messages, model="llama3.2"):
-    try:
-        formatted_messages = [
-            {
-                "role": msg["role"],
-                "content": msg["content"]
-            } for msg in messages
-        ]
-        
-        # Debug log
-        st.write("Sending request to Ollama...")
-        
-        response = requests.post(
-            'http://localhost:11434/api/chat',
-            json={
-                "model": model,
-                "messages": formatted_messages,
-                "stream": False
-            },
-            timeout=30  # Add timeout
-        )
-        
-        # Debug log
-        st.write("Received response from Ollama")
-        
-        response.raise_for_status()
-        result = response.json()
-        
-        if not result.get('message', {}).get('content'):
-            st.error("Empty response from Ollama")
-            return None
-            
-        return result['message']['content']
-    except Timeout:
-        st.error("Ollama request timed out. Please try again.")
-        return None
-    except Exception as e:
-        st.error(f"Ollama API Error: {str(e)}")
-        return None
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10)
-)
-def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free"):
+def openrouter_completion(messages):
+    """Send request to OpenRouter API using meta-llama/llama-3.2-3b-instruct:free model"""
     try:
         # Debug log
-        st.write(f"Sending request to OpenRouter using {model}...")
+        st.write(f"Sending request to OpenRouter using meta-llama/llama-3.2-3b-instruct:free...")
         
         headers = {
             "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-            "HTTP-Referer": "https://github.com/yourusername/youtube-summarizer-app",  # Replace with your repo
+            "HTTP-Referer": "https://github.com/aiafterdark/youtube-summarizer-app",
             "X-Title": "YouTube Summarizer App"
         }
         
@@ -76,7 +32,7 @@ def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json={
-                "model": model,
+                "model": "meta-llama/llama-3.2-3b-instruct:free",
                 "messages": messages,
                 "timeout": 30
             },
@@ -99,9 +55,6 @@ def openrouter_completion(messages, model="meta-llama/llama-3.2-3b-instruct:free
         return None
     except RequestException as e:
         st.error(f"OpenRouter API Error: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Unexpected error: {str(e)}")
         return None
 
 def get_video_info(video_id):
@@ -169,13 +122,29 @@ def get_video_info(video_id):
 
 def process_transcript(transcript_text):
     """Process the transcript text into a clean format"""
+    # Remove XML/HTML tags and metadata
+    transcript_text = re.sub(r'<[^>]+>', '', transcript_text)
+    transcript_text = re.sub(r'\{[^}]+\}', '', transcript_text)
+    
+    # Split into lines and process
     lines = transcript_text.split('\n')
     transcript = []
     current_text = ''
     
     for line in lines:
-        if line.strip() and not line[0].isdigit() and '-->' not in line:
-            current_text += ' ' + line.strip()
+        # Skip empty lines, timing info, and metadata
+        if (line.strip() and 
+            not line[0].isdigit() and 
+            '-->' not in line and 
+            'WEBVTT' not in line and
+            'Kind:' not in line and
+            'Language:' not in line and
+            'Style:' not in line):
+            # Clean the line of any remaining metadata-like content
+            cleaned_line = re.sub(r'\[[^\]]+\]', '', line.strip())
+            cleaned_line = re.sub(r'\([^)]+\)', '', cleaned_line)
+            if cleaned_line:
+                current_text += ' ' + cleaned_line
         elif current_text:
             transcript.append(current_text.strip())
             current_text = ''
@@ -232,20 +201,15 @@ def process_chunks_with_rate_limit(chunks, system_prompt):
                 {"role": "user", "content": chunk}
             ]
             
-            # Try OpenRouter first, fall back to Ollama if it fails
             summary = openrouter_completion(messages)
             if not summary:
-                st.warning("OpenRouter request failed, falling back to Ollama...")
-                summary = ollama_completion(messages)
-            
-            if summary:
-                summaries.append(summary)
-                # Show chunk summary
-                with st.expander(f"Chunk {i+1} Summary"):
-                    st.markdown(summary)
-            else:
                 st.error(f"Failed to process chunk {i+1}")
                 return None
+            
+            summaries.append(summary)
+            # Show chunk summary
+            with st.expander(f"Chunk {i+1} Summary"):
+                st.markdown(summary)
             
             time.sleep(1)  # Rate limiting
         
@@ -381,9 +345,13 @@ def main():
                         # Process chunks with rate limit handling
                         chunk_summaries = process_chunks_with_rate_limit(
                             chunks,
-                            """You are a professional content summarizer. Create a detailed, 
-                            well-structured summary of this part of the video transcript. Focus on the main points, key insights, 
-                            and important details."""
+                            """You are a professional content summarizer. Your task is to create a clear, concise summary of this video transcript section.
+                            Focus on:
+                            1. The main topics and key points discussed
+                            2. Important facts, figures, and statements
+                            3. Any conclusions or significant insights
+                            
+                            Ignore any technical artifacts or formatting. Present the information in a well-structured, easy-to-read format."""
                         )
                         
                         if not chunk_summaries:
@@ -393,20 +361,21 @@ def main():
                         # Generate final summary if we have chunk summaries
                         final_summary_prompt = "\n\n".join(chunk_summaries)
                         messages = [
-                            {"role": "system", "content": """You are a professional content summarizer. Create a cohesive, 
-                            well-structured final summary from these chunk summaries. Format the output in markdown with 
-                            clear sections. Focus on maintaining narrative flow and connecting ideas across chunks."""},
-                            {"role": "user", "content": f"Create a final summary from these chunk summaries:\n\n{final_summary_prompt}"}
+                            {"role": "system", "content": """You are a professional content summarizer. Create a comprehensive summary of this video by combining the key points from all sections.
+                            Your summary should:
+                            1. Start with a brief overview of the video's main topic
+                            2. Present the key points in a logical, flowing narrative
+                            3. Include important details, quotes, or statistics
+                            4. End with the main conclusions or takeaways
+                            
+                            Format the summary with clear sections and bullet points where appropriate."""},
+                            {"role": "user", "content": final_summary_prompt}
                         ]
                         
                         final_summary = openrouter_completion(messages)
                         if not final_summary:
-                            st.warning("OpenRouter request failed, falling back to Ollama...")
-                            final_summary = ollama_completion(messages)
-                        if final_summary:
-                            st.session_state["current_summary"] = final_summary
-                        else:
                             st.error("Failed to generate final summary")
+                            return
                 except Exception as e:
                     st.error(f"Error processing video: {str(e)}")
                 
@@ -454,13 +423,10 @@ def main():
                             ]
                             response = openrouter_completion(messages)
                             if not response:
-                                st.warning("OpenRouter request failed, falling back to Ollama...")
-                                response = ollama_completion(messages)
-                            if response:
-                                st.session_state.messages.append({"role": "assistant", "content": response})
-                                st.markdown(response)
-                            else:
                                 st.error("Failed to generate response")
+                                return
+                            st.session_state.messages.append({"role": "assistant", "content": response})
+                            st.markdown(response)
         else:
             st.info("Generate a video summary first to start chatting!")
 
