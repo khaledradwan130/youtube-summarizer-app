@@ -290,15 +290,20 @@ def process_chunks_with_rate_limit(chunks, system_prompt):
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats"""
     patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'(?:youtu\.be\/|youtube\.com\/shorts\/)([0-9A-Za-z_-]{11})',
-        r'(?:embed\/)([0-9A-Za-z_-]{11})',
-        r'^([0-9A-Za-z_-]{11})$'
+        r'(?:v=|\/)([0-9A-Za-z_-]{11})(?:[?&]|$)',  # Standard and parameterized URLs
+        r'(?:youtu\.be\/|youtube\.com\/shorts\/)([0-9A-Za-z_-]{11})(?:[?&]|$)',  # Short URLs and shorts with parameters
+        r'(?:embed\/)([0-9A-Za-z_-]{11})',  # Embed URLs
+        r'^([0-9A-Za-z_-]{11})$'  # Direct video IDs
     ]
     
     if not url:
         return None
-        
+    
+    # Remove any whitespace and handle mobile URLs
+    url = url.strip()
+    url = url.replace('http://youtu.be/', 'https://youtu.be/')
+    url = url.replace('http://youtube.com/', 'https://youtube.com/')
+    
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
