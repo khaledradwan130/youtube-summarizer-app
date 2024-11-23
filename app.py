@@ -452,7 +452,7 @@ def main():
                         final_summary = openrouter_completion(messages)
                         if final_summary:
                             st.session_state["current_summary"] = final_summary
-                            st.markdown("### Final Summary")
+                            st.markdown("### Summary")
                             st.markdown(final_summary)
                         else:
                             st.error("Failed to generate final summary")
@@ -460,7 +460,7 @@ def main():
                 except Exception as e:
                     st.error(f"Error processing video: {str(e)}")
                 
-        # Display video details and summary
+        # Display video details 
         if st.session_state.get("video_details"):
             with st.container():
                 st.markdown("### Video Details")
@@ -474,8 +474,7 @@ def main():
         
         if st.session_state.get("current_summary"):
             with st.container():
-                st.markdown("### Summary")
-                st.markdown(st.session_state["current_summary"])
+                pass
 
     with col2:
         st.markdown("### Chat with Video Content")
