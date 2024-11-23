@@ -397,44 +397,68 @@ def main():
                         
                         transcript_text = process_transcript(transcript)
                         
-                        # Show transcript preview
-                        with st.expander("View transcript"):
+                        # Create a single expander for processing status
+                        with st.expander("View Processing Details"):
+                            # Show transcript preview
+                            st.markdown("### Transcript Preview")
                             st.text(transcript_text[:1000] + "..." if len(transcript_text) > 1000 else transcript_text)
-                        
-                        # Split text into chunks
-                        chunks = chunk_text(transcript_text, chunk_size)
-                        if not chunks:
-                            st.error("Could not split transcript into chunks")
-                            return
                             
-                        st.write(f"Split transcript into {len(chunks)} chunks")
-                        
-                    with st.spinner(f"Generating summary from {len(chunks)} chunks..."):
-                        # Process chunks with rate limit handling
-                        chunk_summaries = process_chunks_with_rate_limit(
-                            chunks,
-                            """You are a professional content summarizer. Your task is to create a clear, concise summary of this video transcript section.
-                            Focus on:
-                            1. The main topics and key points discussed
-                            2. Important facts, figures, and statements
-                            3. Any conclusions or significant insights
+                            # Split text into chunks
+                            chunks = chunk_text(transcript_text, chunk_size)
+                            if not chunks:
+                                st.error("Could not split transcript into chunks")
+                                return
                             
-                            Ignore any technical artifacts or formatting. Present the information in a well-structured, easy-to-read format."""
-                        )
-                        
-                        if not chunk_summaries:
-                            st.error("Failed to generate chunk summaries")
-                            return
-                        
-                        # Store chunk summaries in session state
-                        st.session_state["chunk_summaries"] = chunk_summaries
-                        
-                        # Display chunk summaries
-                        with st.expander("View Individual Chunk Summaries"):
-                            for i, summary in enumerate(chunk_summaries, 1):
-                                st.markdown(f"#### Chunk {i} Summary")
-                                st.markdown(summary)
-                                st.markdown("---")
+                            st.write(f"Processing {len(chunks)} chunks...")
+                            
+                            # Create progress tracking
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            # Process chunks with rate limit handling
+                            chunk_summaries = []
+                            for i, chunk in enumerate(chunks, 1):
+                                status_text.text(f"Processing chunk {i}/{len(chunks)}...")
+                                
+                                messages = [
+                                    {"role": "system", "content": """You are a professional content summarizer. Your task is to create a clear, concise summary of this video transcript section.
+                                    Focus on:
+                                    1. The main topics and key points discussed
+                                    2. Important facts, figures, and statements
+                                    3. Any conclusions or significant insights
+                                    
+                                    Ignore any technical artifacts or formatting. Present the information in a well-structured, easy-to-read format."""},
+                                    {"role": "user", "content": f"Please provide a detailed summary of this video transcript part:\n\n{chunk}"}
+                                ]
+                                
+                                st.text(f"Processing chunk {i}/{len(chunks)}: {chunk[:100]}...")
+                                
+                                summary = openrouter_completion(messages)
+                                if summary:
+                                    chunk_summaries.append(summary)
+                                    st.markdown(f"✓ Chunk {i} processed")
+                                else:
+                                    st.error(f"Failed to process chunk {i}")
+                                    continue
+                                
+                                progress_bar.progress(i / len(chunks))
+                                
+                                # Add a small delay between chunks
+                                if i < len(chunks):
+                                    time.sleep(2)
+                            
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            # Store chunk summaries in session state
+                            st.session_state["chunk_summaries"] = chunk_summaries
+                            
+                            # Display chunk summaries in a collapsible section
+                            with st.expander("View Individual Chunk Summaries"):
+                                for i, summary in enumerate(chunk_summaries, 1):
+                                    st.markdown(f"#### Chunk {i} Summary")
+                                    st.markdown(summary)
+                                    st.markdown("---")
                         
                         # Generate final summary if we have chunk summaries
                         st.write("Generating final summary...")
