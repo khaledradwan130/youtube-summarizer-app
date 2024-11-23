@@ -263,14 +263,14 @@ def process_chunks_with_rate_limit(chunks, system_prompt):
         ]
         
         # Show current chunk being processed
-        with st.expander(f"Processing chunk {i}/{total_chunks}"):
-            st.text(chunk[:200] + "..." if len(chunk) > 200 else chunk)
+        with st.container():
+            st.text(f"Processing chunk {i}/{total_chunks}: {chunk[:100]}...")
         
         summary = openrouter_completion(messages)
         if summary:
             summaries.append(summary)
             # Show chunk summary
-            with st.expander(f"Chunk {i} Summary"):
+            with st.container():
                 st.markdown(summary)
         else:
             st.error(f"Failed to process chunk {i}")
@@ -397,68 +397,78 @@ def main():
                         
                         transcript_text = process_transcript(transcript)
                         
-                        # Create a single expander for processing status
-                        with st.expander("View Processing Details"):
-                            # Show transcript preview
-                            st.markdown("### Transcript Preview")
-                            st.text(transcript_text[:1000] + "..." if len(transcript_text) > 1000 else transcript_text)
+                        # Create processing status container
+                        with st.container():
+                            st.markdown("### Processing Details")
                             
-                            # Split text into chunks
-                            chunks = chunk_text(transcript_text, chunk_size)
-                            if not chunks:
-                                st.error("Could not split transcript into chunks")
-                                return
+                            # Create tabs for different sections
+                            transcript_tab, processing_tab = st.tabs(["Transcript", "Processing Status"])
                             
-                            st.write(f"Processing {len(chunks)} chunks...")
+                            with transcript_tab:
+                                st.markdown("#### Transcript Preview")
+                                st.text(transcript_text[:1000] + "..." if len(transcript_text) > 1000 else transcript_text)
                             
-                            # Create progress tracking
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
-                            
-                            # Process chunks with rate limit handling
-                            chunk_summaries = []
-                            for i, chunk in enumerate(chunks, 1):
-                                status_text.text(f"Processing chunk {i}/{len(chunks)}...")
+                            with processing_tab:
+                                # Split text into chunks
+                                chunks = chunk_text(transcript_text, chunk_size)
+                                if not chunks:
+                                    st.error("Could not split transcript into chunks")
+                                    return
                                 
-                                messages = [
-                                    {"role": "system", "content": """You are a professional content summarizer. Your task is to create a clear, concise summary of this video transcript section.
-                                    Focus on:
-                                    1. The main topics and key points discussed
-                                    2. Important facts, figures, and statements
-                                    3. Any conclusions or significant insights
+                                st.write(f"Processing {len(chunks)} chunks...")
+                                
+                                # Create progress tracking
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                chunk_status = st.empty()
+                                
+                                # Process chunks with rate limit handling
+                                chunk_summaries = []
+                                for i, chunk in enumerate(chunks, 1):
+                                    status_text.text(f"Processing chunk {i}/{len(chunks)}...")
                                     
-                                    Ignore any technical artifacts or formatting. Present the information in a well-structured, easy-to-read format."""},
-                                    {"role": "user", "content": f"Please provide a detailed summary of this video transcript part:\n\n{chunk}"}
-                                ]
+                                    messages = [
+                                        {"role": "system", "content": """You are a professional content summarizer. Your task is to create a clear, concise summary of this video transcript section.
+                                        Focus on:
+                                        1. The main topics and key points discussed
+                                        2. Important facts, figures, and statements
+                                        3. Any conclusions or significant insights
+                                        
+                                        Ignore any technical artifacts or formatting. Present the information in a well-structured, easy-to-read format."""},
+                                        {"role": "user", "content": f"Please provide a detailed summary of this video transcript part:\n\n{chunk}"}
+                                    ]
+                                    
+                                    chunk_status.text(f"Current chunk preview: {chunk[:100]}...")
+                                    
+                                    summary = openrouter_completion(messages)
+                                    if summary:
+                                        chunk_summaries.append(summary)
+                                        st.markdown(f"✓ Chunk {i} processed")
+                                    else:
+                                        st.error(f"Failed to process chunk {i}")
+                                        continue
+                                    
+                                    progress_bar.progress(i / len(chunks))
+                                    
+                                    # Add a small delay between chunks
+                                    if i < len(chunks):
+                                        time.sleep(2)
                                 
-                                st.text(f"Processing chunk {i}/{len(chunks)}: {chunk[:100]}...")
+                                progress_bar.empty()
+                                status_text.empty()
+                                chunk_status.empty()
                                 
-                                summary = openrouter_completion(messages)
-                                if summary:
-                                    chunk_summaries.append(summary)
-                                    st.markdown(f"✓ Chunk {i} processed")
-                                else:
-                                    st.error(f"Failed to process chunk {i}")
-                                    continue
+                                # Store chunk summaries in session state
+                                st.session_state["chunk_summaries"] = chunk_summaries
                                 
-                                progress_bar.progress(i / len(chunks))
-                                
-                                # Add a small delay between chunks
-                                if i < len(chunks):
-                                    time.sleep(2)
-                            
-                            progress_bar.empty()
-                            status_text.empty()
-                            
-                            # Store chunk summaries in session state
-                            st.session_state["chunk_summaries"] = chunk_summaries
-                            
-                            # Display chunk summaries in a collapsible section
-                            with st.expander("View Individual Chunk Summaries"):
-                                for i, summary in enumerate(chunk_summaries, 1):
-                                    st.markdown(f"#### Chunk {i} Summary")
-                                    st.markdown(summary)
-                                    st.markdown("---")
+                                # Display chunk summaries in a table
+                                if chunk_summaries:
+                                    st.markdown("#### Individual Chunk Summaries")
+                                    for i, summary in enumerate(chunk_summaries, 1):
+                                        with st.container():
+                                            st.markdown(f"**Chunk {i}**")
+                                            st.markdown(summary)
+                                            st.markdown("---")
                         
                         # Generate final summary if we have chunk summaries
                         st.write("Generating final summary...")
