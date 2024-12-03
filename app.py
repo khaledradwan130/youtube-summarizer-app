@@ -194,7 +194,6 @@ def process_vtt_captions(url):
             
             if transcript_list:
                 st.write(f"Successfully parsed {len(transcript_list)} captions")
-                st.write("First caption:", transcript_list[0])
                 return transcript_list
             else:
                 st.warning("No valid captions found in VTT file")
