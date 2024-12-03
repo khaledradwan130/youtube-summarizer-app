@@ -86,11 +86,10 @@ def openrouter_completion(messages):
         return None
 
 def get_transcript_yt_dlp(video_id):
-    """Enhanced transcript retrieval using yt-dlp"""
+    """Get English transcript using yt-dlp"""
     try:
         url = f"https://www.youtube.com/watch?v={video_id}"
         
-        # Initial configuration for video info
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -103,8 +102,6 @@ def get_transcript_yt_dlp(video_id):
                 'key': 'FFmpegSubtitlesConvertor',
                 'format': 'vtt',
             }],
-            'extract_flat': False,
-            'write_auto_subs': True
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -121,63 +118,33 @@ def get_transcript_yt_dlp(video_id):
                 }
                 st.session_state["video_details"] = video_details
 
-                # Debug: Show available formats
-                st.write("Available subtitles:", info.get('subtitles', {}))
-                st.write("Available automatic captions:", info.get('automatic_captions', {}))
-
-                transcript_list = []
-
-                # Try to get manual subtitles first
+                # Try to get manual English subtitles first
                 if info.get('subtitles') and 'en' in info['subtitles']:
-                    st.info("Found manual English subtitles")
                     captions = info['subtitles']['en']
-                    
-                    # Find the VTT format caption
-                    vtt_caption = None
                     for cap in captions:
                         if isinstance(cap, dict) and cap.get('ext') == 'vtt':
-                            vtt_caption = cap
-                            break
-                    
-                    if vtt_caption and 'url' in vtt_caption:
-                        transcript_list = process_vtt_captions(vtt_caption['url'])
-                        if transcript_list:
-                            st.success("Successfully processed manual subtitles")
-                            return transcript_list
+                            transcript_list = process_vtt_captions(cap['url'])
+                            if transcript_list:
+                                return transcript_list
 
-                # Try automatic captions if manual ones failed
-                if not transcript_list and info.get('automatic_captions') and 'en' in info['automatic_captions']:
-                    st.info("Found automatic English captions")
+                # Fall back to automatic English captions if needed
+                if info.get('automatic_captions') and 'en' in info['automatic_captions']:
                     captions = info['automatic_captions']['en']
-                    
-                    # Find the VTT format caption
-                    vtt_caption = None
                     for cap in captions:
                         if isinstance(cap, dict) and cap.get('ext') == 'vtt':
-                            vtt_caption = cap
-                            break
-                    
-                    if vtt_caption and 'url' in vtt_caption:
-                        transcript_list = process_vtt_captions(vtt_caption['url'])
-                        if transcript_list:
-                            st.success("Successfully processed automatic captions")
-                            return transcript_list
+                            transcript_list = process_vtt_captions(cap['url'])
+                            if transcript_list:
+                                return transcript_list
 
-                if not transcript_list:
-                    st.warning("No captions could be extracted")
-                    return None
+                return None
 
             except Exception as e:
                 st.error(f"Error extracting video info: {str(e)}")
-                st.write("Full error details:", str(e))
                 return None
                 
     except Exception as e:
         st.error(f"yt-dlp error: {str(e)}")
-        st.write("Full error details:", str(e))
         return None
-    
-    return None
 
 def process_vtt_captions(url):
     """Process VTT captions from URL"""
