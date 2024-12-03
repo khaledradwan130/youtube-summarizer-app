@@ -85,6 +85,82 @@ def openrouter_completion(messages):
         st.error(f"Unexpected error while calling OpenRouter: {str(e)}")
         return None
 
+def get_transcript_yt_dlp(video_id):
+    """Enhanced transcript retrieval using yt-dlp"""
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        # Initial configuration for video info
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitlesformat': 'srv1',  # Prefer srv1 format for better compatibility
+            'subtitleslangs': ['en'],
+            'skip_download': True,
+            'format': 'best'
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+                
+                # Store video details in session state
+                video_details = {
+                    'title': info.get('title', ''),
+                    'description': info.get('description', ''),
+                    'duration': info.get('duration', 0),
+                    'view_count': info.get('view_count', 0),
+                    'uploader': info.get('uploader', ''),
+                }
+                st.session_state["video_details"] = video_details
+
+                # First try manual subtitles
+                if info.get('subtitles') and info['subtitles'].get('en'):
+                    st.info("Found manual English subtitles")
+                    transcript_list = []
+                    for entry in info['subtitles']['en']:
+                        if isinstance(entry, dict) and 'ext' in entry:
+                            if entry['ext'] == 'srv1':
+                                transcript_list.append({
+                                    'text': entry.get('text', ''),
+                                    'start': float(entry.get('start', 0)),
+                                    'duration': float(entry.get('duration', 0))
+                                })
+                    if transcript_list:
+                        return transcript_list
+
+                # If no manual subtitles, try automatic captions
+                if info.get('automatic_captions') and info['automatic_captions'].get('en'):
+                    st.info("Found automatic English captions")
+                    auto_caps = info['automatic_captions']['en']
+                    transcript_list = []
+                    
+                    for entry in auto_caps:
+                        if isinstance(entry, dict):
+                            transcript_list.append({
+                                'text': entry.get('text', ''),
+                                'start': float(entry.get('start', 0)),
+                                'duration': float(entry.get('duration', 0))
+                            })
+                    
+                    if transcript_list:
+                        return transcript_list
+                    
+                st.warning("No English subtitles or automatic captions found")
+                return None
+
+            except Exception as e:
+                st.error(f"Error extracting video info: {str(e)}")
+                return None
+                
+    except Exception as e:
+        st.error(f"yt-dlp error: {str(e)}")
+        return None
+    
+    return None
+
 def get_transcript(video_id):
     """Get transcript with enhanced error handling and logging"""
     transcript = None
@@ -97,8 +173,12 @@ def get_transcript(video_id):
         if transcript:
             st.success("Successfully retrieved transcript using YouTube Transcript API")
             return transcript
-    except Exception as e:
+    except (NoTranscriptFound, TranscriptsDisabled) as e:
         error_msg = f"YouTube Transcript API failed: {str(e)}"
+        st.warning(error_msg)
+        error_messages.append(error_msg)
+    except Exception as e:
+        error_msg = f"YouTube Transcript API failed with unexpected error: {str(e)}"
         st.warning(error_msg)
         error_messages.append(error_msg)
 
@@ -109,75 +189,18 @@ def get_transcript(video_id):
         if transcript:
             st.success("Successfully retrieved transcript using yt-dlp")
             return transcript
+        else:
+            error_msg = "yt-dlp could not find any transcripts or captions"
+            error_messages.append(error_msg)
     except Exception as e:
         error_msg = f"yt-dlp method failed: {str(e)}"
         st.warning(error_msg)
         error_messages.append(error_msg)
 
     # If all methods fail
-    error_message = " | ".join(error_messages) if error_messages else "No available transcripts found"
+    error_message = "\n".join(error_messages) if error_messages else "No available transcripts found"
     st.error("Could not retrieve transcript. Please try another video.")
-    st.error(f"Details: {error_message}")
-    return None
-
-def get_transcript_yt_dlp(video_id):
-    """Enhanced transcript retrieval using yt-dlp"""
-    try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': True
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            # Get video details
-            video_details = {
-                'title': info.get('title', ''),
-                'description': info.get('description', ''),
-                'duration': info.get('duration', 0),
-                'view_count': info.get('view_count', 0),
-                'uploader': info.get('uploader', ''),
-            }
-            
-            st.session_state["video_details"] = video_details
-            
-            # Configure options for subtitles
-            ydl_opts.update({
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'subtitleslangs': ['en'],
-                'skip_download': True,
-                'format': 'best'
-            })
-            
-            # Try to get subtitles
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                result = ydl.extract_info(url, download=False)
-                
-                # Check for manual subtitles
-                if result.get('subtitles') and result['subtitles'].get('en'):
-                    st.info("Found manual English subtitles")
-                    subs = result['subtitles']['en']
-                    if isinstance(subs, list):
-                        return [{'text': sub.get('text', ''), 'start': sub.get('start', 0), 'duration': sub.get('duration', 0)} 
-                               for sub in subs if sub.get('text')]
-                
-                # Check for automatic captions
-                if result.get('automatic_captions') and result['automatic_captions'].get('en'):
-                    st.info("Found automatic English captions")
-                    auto_caps = result['automatic_captions']['en']
-                    if isinstance(auto_caps, list):
-                        return [{'text': cap.get('text', ''), 'start': cap.get('start', 0), 'duration': cap.get('duration', 0)} 
-                               for cap in auto_caps if cap.get('text')]
-                    
-    except Exception as e:
-        st.error(f"yt-dlp error: {str(e)}")
-        return None
-    
+    st.error(f"Details:\n{error_message}")
     return None
 
 def process_transcript(transcript):
