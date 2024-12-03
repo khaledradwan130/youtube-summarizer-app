@@ -325,6 +325,15 @@ def clean_text(text):
         # Remove multiple spaces
         text = re.sub(r'\s+', ' ', text)
         
+        # Remove repeated phrases (common in auto-generated captions)
+        # This will match phrases of 3-10 words that are repeated
+        for length in range(3, 11):
+            pattern = r'(\b\w+(?:\s+\w+){' + str(length-1) + r'}\b)\s+\1\b'
+            text = re.sub(pattern, r'\1', text)
+        
+        # Remove single word repetitions
+        text = re.sub(r'\b(\w+)(\s+\1\b)+', r'\1', text)
+        
         # Strip whitespace
         text = text.strip()
         
@@ -655,8 +664,9 @@ def main():
                                 
                                 # Process chunks with rate limit handling
                                 chunk_summaries = []
+                                total_chunks = len(chunks)
                                 for i, chunk in enumerate(chunks, 1):
-                                    status_text.text(f"Processing chunk {i}/{len(chunks)}...")
+                                    status_text.text(f"Processing chunk {i}/{total_chunks}...")
                                     
                                     messages = [
                                         {"role": "system", "content": """You are a professional content summarizer. Your task is to create a clear, concise summary of this video transcript section.
@@ -679,7 +689,7 @@ def main():
                                         st.error(f"Failed to process chunk {i}")
                                         continue
                                     
-                                    progress_bar.progress(i / len(chunks))
+                                    progress_bar.progress(i / total_chunks)
                                     
                                     # Add a small delay between chunks
                                     if i < total_chunks:
