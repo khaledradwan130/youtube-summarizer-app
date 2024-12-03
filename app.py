@@ -96,7 +96,7 @@ def get_transcript_yt_dlp(video_id):
             'no_warnings': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
-            'subtitlesformat': 'srv1',  # Prefer srv1 format for better compatibility
+            'subtitlesformat': 'json3',  # Changed to json3 format for better compatibility
             'subtitleslangs': ['en'],
             'skip_download': True,
             'format': 'best'
@@ -116,27 +116,20 @@ def get_transcript_yt_dlp(video_id):
                 }
                 st.session_state["video_details"] = video_details
 
-                # First try manual subtitles
-                if info.get('subtitles') and info['subtitles'].get('en'):
-                    st.info("Found manual English subtitles")
-                    transcript_list = []
-                    for entry in info['subtitles']['en']:
-                        if isinstance(entry, dict) and 'ext' in entry:
-                            if entry['ext'] == 'srv1':
-                                transcript_list.append({
-                                    'text': entry.get('text', ''),
-                                    'start': float(entry.get('start', 0)),
-                                    'duration': float(entry.get('duration', 0))
-                                })
-                    if transcript_list:
-                        return transcript_list
+                # Debug: Print the available subtitle formats
+                if info.get('automatic_captions'):
+                    st.write("Available automatic caption formats:", info['automatic_captions'].keys())
+                if info.get('subtitles'):
+                    st.write("Available subtitle formats:", info['subtitles'].keys())
 
-                # If no manual subtitles, try automatic captions
-                if info.get('automatic_captions') and info['automatic_captions'].get('en'):
-                    st.info("Found automatic English captions")
-                    auto_caps = info['automatic_captions']['en']
-                    transcript_list = []
+                # First try manual subtitles
+                if info.get('subtitles') and 'en' in info['subtitles']:
+                    st.info("Found manual English subtitles")
+                    auto_caps = info['subtitles']['en']
+                    # Debug the structure
+                    st.write("Manual subtitle structure:", auto_caps[0] if auto_caps else "No entries")
                     
+                    transcript_list = []
                     for entry in auto_caps:
                         if isinstance(entry, dict):
                             transcript_list.append({
@@ -144,8 +137,43 @@ def get_transcript_yt_dlp(video_id):
                                 'start': float(entry.get('start', 0)),
                                 'duration': float(entry.get('duration', 0))
                             })
+                    if transcript_list:
+                        return transcript_list
+
+                # If no manual subtitles, try automatic captions
+                if info.get('automatic_captions') and 'en' in info['automatic_captions']:
+                    st.info("Found automatic English captions")
+                    auto_caps = info['automatic_captions']['en']
+                    # Debug the structure
+                    st.write("Automatic caption structure:", auto_caps[0] if auto_caps else "No entries")
+                    
+                    transcript_list = []
+                    
+                    for entry in auto_caps:
+                        if isinstance(entry, dict):
+                            # Debug each entry
+                            st.write("Processing caption entry:", entry)
+                            
+                            # Try to get the text from different possible locations
+                            text = None
+                            if 'text' in entry:
+                                text = entry['text']
+                            elif 'content' in entry:
+                                text = entry['content']
+                            elif 'fragments' in entry:
+                                text = ' '.join([f.get('text', '') for f in entry['fragments']])
+                            
+                            if text:
+                                transcript_list.append({
+                                    'text': text,
+                                    'start': float(entry.get('start', 0)),
+                                    'duration': float(entry.get('duration', 0))
+                                })
                     
                     if transcript_list:
+                        # Debug the final transcript
+                        st.write(f"Generated transcript with {len(transcript_list)} entries")
+                        st.write("First entry example:", transcript_list[0] if transcript_list else "No entries")
                         return transcript_list
                     
                 st.warning("No English subtitles or automatic captions found")
@@ -153,10 +181,12 @@ def get_transcript_yt_dlp(video_id):
 
             except Exception as e:
                 st.error(f"Error extracting video info: {str(e)}")
+                st.write("Full error details:", str(e))
                 return None
                 
     except Exception as e:
         st.error(f"yt-dlp error: {str(e)}")
+        st.write("Full error details:", str(e))
         return None
     
     return None
