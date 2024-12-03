@@ -218,7 +218,22 @@ def get_transcript(video_id):
     transcript = None
     error_messages = []
     
-    # Method 1: YouTube Transcript API (primary method)
+    # Method 1: yt-dlp (primary method)
+    try:
+        st.info("Attempting to retrieve transcript using yt-dlp...")
+        transcript = get_transcript_yt_dlp(video_id)
+        if transcript:
+            st.success("Successfully retrieved transcript using yt-dlp")
+            return transcript
+        else:
+            error_msg = "yt-dlp could not find any transcripts or captions"
+            error_messages.append(error_msg)
+    except Exception as e:
+        error_msg = f"yt-dlp method failed: {str(e)}"
+        st.warning(error_msg)
+        error_messages.append(error_msg)
+
+    # Method 2: YouTube Transcript API (fallback)
     try:
         st.info("Attempting to retrieve transcript using YouTube Transcript API...")
         transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
@@ -231,21 +246,6 @@ def get_transcript(video_id):
         error_messages.append(error_msg)
     except Exception as e:
         error_msg = f"YouTube Transcript API failed with unexpected error: {str(e)}"
-        st.warning(error_msg)
-        error_messages.append(error_msg)
-
-    # Method 2: yt-dlp (fallback)
-    try:
-        st.info("Attempting to retrieve transcript using yt-dlp...")
-        transcript = get_transcript_yt_dlp(video_id)
-        if transcript:
-            st.success("Successfully retrieved transcript using yt-dlp")
-            return transcript
-        else:
-            error_msg = "yt-dlp could not find any transcripts or captions"
-            error_messages.append(error_msg)
-    except Exception as e:
-        error_msg = f"yt-dlp method failed: {str(e)}"
         st.warning(error_msg)
         error_messages.append(error_msg)
 
