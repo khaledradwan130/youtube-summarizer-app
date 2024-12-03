@@ -208,66 +208,120 @@ def process_transcript(transcript):
     if not transcript:
         return ""
     
-    # Extract text from transcript entries and join with spaces
-    text = ' '.join([entry.get('text', '') for entry in transcript])
-    
-    # Clean the text
-    text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
-    text = re.sub(r'\[[^\]]+\]', '', text)  # Remove metadata markers
-    text = re.sub(r'\([^)]+\)', '', text)  # Remove parenthetical content
-    text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
-    
-    return text.strip()
+    try:
+        # Extract text from transcript entries and join with spaces
+        text = ' '.join([str(entry.get('text', '')).strip() for entry in transcript if entry.get('text')])
+        
+        # Clean the text
+        text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
+        text = re.sub(r'\[[^\]]+\]', '', text)  # Remove metadata markers
+        text = re.sub(r'\([^)]+\)', '', text)  # Remove parenthetical content
+        text = re.sub(r'♪.*?♪', '', text)  # Remove musical note sections
+        text = re.sub(r'\s*\n\s*', ' ', text)  # Replace newlines with spaces
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+        
+        # Add periods to help with sentence splitting if missing
+        text = re.sub(r'([a-zA-Z0-9])\s+([A-Z])', r'\1. \2', text)
+        
+        return text.strip()
+    except Exception as e:
+        st.error(f"Error processing transcript: {str(e)}")
+        return ""
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
-    # Clean and prepare the text
-    text = re.sub(r'\s+', ' ', text).strip()
-    
-    # Split into sentences
-    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
-    
-    chunks = []
-    current_chunk = []
-    current_size = 0
-    
-    for sentence in sentences:
-        sentence_size = len(sentence)
-        
-        # If a single sentence is too long, split it
-        if sentence_size > chunk_size:
-            words = sentence.split()
-            current_words = []
-            current_word_count = 0
+    try:
+        if not text:
+            st.warning("No text to process")
+            return []
             
-            for word in words:
-                if current_word_count + len(word) > chunk_size:
-                    if current_words:
-                        chunks.append(" ".join(current_words) + "...")
-                    current_words = [word]
-                    current_word_count = len(word)
-                else:
-                    current_words.append(word)
-                    current_word_count += len(word) + 1
-            
-            if current_words:
-                chunks.append(" ".join(current_words) + "...")
+        # Clean and prepare the text
+        text = re.sub(r'\s+', ' ', text).strip()
         
-        # Normal sentence processing
-        elif current_size + sentence_size > chunk_size:
-            if current_chunk:
-                chunks.append(" ".join(current_chunk) + ".")
-            current_chunk = [sentence]
-            current_size = sentence_size
-        else:
-            current_chunk.append(sentence)
-            current_size += sentence_size
-    
-    # Add any remaining content
-    if current_chunk:
-        chunks.append(" ".join(current_chunk) + ".")
-    
-    return chunks
+        # If text is shorter than chunk size, return it as a single chunk
+        if len(text) <= chunk_size:
+            return [text]
+        
+        # Split into sentences (considering multiple punctuation marks)
+        sentences = []
+        current_sentence = []
+        
+        # Split text into words first
+        words = text.split()
+        
+        for word in words:
+            current_sentence.append(word)
+            # Check if word ends with sentence-ending punctuation
+            if word and word[-1] in '.!?':
+                sentences.append(' '.join(current_sentence))
+                current_sentence = []
+        
+        # Add any remaining words as a sentence
+        if current_sentence:
+            sentences.append(' '.join(current_sentence))
+        
+        # Remove empty sentences and strip whitespace
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for sentence in sentences:
+            sentence_size = len(sentence)
+            
+            # If a single sentence is longer than chunk_size, split it by words
+            if sentence_size > chunk_size:
+                if current_chunk:
+                    chunks.append(' '.join(current_chunk))
+                    current_chunk = []
+                    current_size = 0
+                
+                # Split long sentence into smaller parts
+                words = sentence.split()
+                temp_chunk = []
+                temp_size = 0
+                
+                for word in words:
+                    word_size = len(word) + 1  # +1 for space
+                    if temp_size + word_size > chunk_size and temp_chunk:
+                        chunks.append(' '.join(temp_chunk))
+                        temp_chunk = [word]
+                        temp_size = word_size
+                    else:
+                        temp_chunk.append(word)
+                        temp_size += word_size
+                
+                if temp_chunk:
+                    chunks.append(' '.join(temp_chunk))
+            
+            # If adding this sentence would exceed chunk_size, start a new chunk
+            elif current_size + sentence_size + 1 > chunk_size and current_chunk:
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [sentence]
+                current_size = sentence_size
+            
+            # Add sentence to current chunk
+            else:
+                current_chunk.append(sentence)
+                current_size += sentence_size + 1
+        
+        # Add any remaining sentences
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        # Final cleanup of chunks
+        chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
+        
+        if not chunks:
+            st.warning("No chunks were generated from the text")
+            return []
+            
+        return chunks
+        
+    except Exception as e:
+        st.error(f"Error chunking text: {str(e)}")
+        return []
 
 def process_chunks_with_rate_limit(chunks, system_prompt):
     """Process chunks with rate limit handling and progress tracking"""
