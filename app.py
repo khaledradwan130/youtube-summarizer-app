@@ -206,11 +206,29 @@ def get_transcript(video_id):
 def process_transcript(transcript):
     """Process transcript into a clean format"""
     if not transcript:
+        st.error("No transcript data provided")
         return ""
     
     try:
+        # Debug information
+        st.write(f"Processing transcript with {len(transcript)} entries")
+        
         # Extract text from transcript entries and join with spaces
-        text = ' '.join([str(entry.get('text', '')).strip() for entry in transcript if entry.get('text')])
+        text_entries = []
+        for entry in transcript:
+            if isinstance(entry, dict):
+                text = entry.get('text', '')
+                if text and isinstance(text, str):
+                    text_entries.append(text.strip())
+        
+        if not text_entries:
+            st.error("No valid text entries found in transcript")
+            return ""
+            
+        text = ' '.join(text_entries)
+        
+        # Debug information
+        st.write(f"Raw text length: {len(text)} characters")
         
         # Clean the text
         text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
@@ -223,7 +241,17 @@ def process_transcript(transcript):
         # Add periods to help with sentence splitting if missing
         text = re.sub(r'([a-zA-Z0-9])\s+([A-Z])', r'\1. \2', text)
         
-        return text.strip()
+        cleaned_text = text.strip()
+        
+        # Debug information
+        st.write(f"Cleaned text length: {len(cleaned_text)} characters")
+        
+        if not cleaned_text:
+            st.error("Text is empty after cleaning")
+            return ""
+            
+        return cleaned_text
+        
     except Exception as e:
         st.error(f"Error processing transcript: {str(e)}")
         return ""
@@ -232,14 +260,18 @@ def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
     try:
         if not text:
-            st.warning("No text to process")
+            st.error("No text provided for chunking")
             return []
+            
+        # Debug information
+        st.write(f"Chunking text of length: {len(text)}")
             
         # Clean and prepare the text
         text = re.sub(r'\s+', ' ', text).strip()
         
         # If text is shorter than chunk size, return it as a single chunk
         if len(text) <= chunk_size:
+            st.write("Text is shorter than chunk size, returning as single chunk")
             return [text]
         
         # Split into sentences (considering multiple punctuation marks)
@@ -262,6 +294,9 @@ def chunk_text(text, chunk_size):
         
         # Remove empty sentences and strip whitespace
         sentences = [s.strip() for s in sentences if s.strip()]
+        
+        # Debug information
+        st.write(f"Number of sentences: {len(sentences)}")
         
         chunks = []
         current_chunk = []
@@ -313,8 +348,13 @@ def chunk_text(text, chunk_size):
         # Final cleanup of chunks
         chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
         
+        # Debug information
+        st.write(f"Generated {len(chunks)} chunks")
+        if chunks:
+            st.write(f"Average chunk size: {sum(len(chunk) for chunk in chunks) / len(chunks):.0f} characters")
+        
         if not chunks:
-            st.warning("No chunks were generated from the text")
+            st.error("No chunks were generated from the text")
             return []
             
         return chunks
