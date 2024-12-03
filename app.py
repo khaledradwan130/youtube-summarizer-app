@@ -578,6 +578,7 @@ def main():
             st.session_state["current_url"] = video_url
             st.session_state["video_details"] = None
             st.session_state["chunk_summaries"] = []
+            st.session_state["current_summary"] = ""
         
         if video_url:
             video_id = extract_video_id(video_url)
@@ -603,6 +604,11 @@ def main():
                 step=1000,
                 help="Adjust this to control how detailed the summary should be. Lower values create more detailed summaries. (Long Podcast (1hr+) should be 7000+)"
             )
+
+        # Always show the current summary if it exists
+        if st.session_state["current_summary"]:
+            st.markdown("### Current Summary")
+            st.markdown(st.session_state["current_summary"])
 
         if st.button("Generate Summary", type="primary"):
             if not video_url:
@@ -676,7 +682,7 @@ def main():
                                     progress_bar.progress(i / len(chunks))
                                     
                                     # Add a small delay between chunks
-                                    if i < len(chunks):
+                                    if i < total_chunks:
                                         time.sleep(2)
                                 
                                 progress_bar.empty()
