@@ -96,10 +96,15 @@ def get_transcript_yt_dlp(video_id):
             'no_warnings': True,
             'writesubtitles': True,
             'writeautomaticsub': True,
-            'subtitlesformat': 'json3',  # Changed to json3 format for better compatibility
             'subtitleslangs': ['en'],
             'skip_download': True,
-            'format': 'best'
+            'format': 'best',
+            'postprocessors': [{
+                'key': 'FFmpegSubtitlesConvertor',
+                'format': 'vtt',
+            }],
+            'extract_flat': False,
+            'write_auto_subs': True
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -116,68 +121,51 @@ def get_transcript_yt_dlp(video_id):
                 }
                 st.session_state["video_details"] = video_details
 
-                # Debug: Print the available subtitle formats
-                if info.get('automatic_captions'):
-                    st.write("Available automatic caption formats:", info['automatic_captions'].keys())
-                if info.get('subtitles'):
-                    st.write("Available subtitle formats:", info['subtitles'].keys())
+                # Debug: Show available formats
+                st.write("Available subtitles:", info.get('subtitles', {}))
+                st.write("Available automatic captions:", info.get('automatic_captions', {}))
 
-                # First try manual subtitles
+                transcript_list = []
+
+                # Try to get manual subtitles first
                 if info.get('subtitles') and 'en' in info['subtitles']:
                     st.info("Found manual English subtitles")
-                    auto_caps = info['subtitles']['en']
-                    # Debug the structure
-                    st.write("Manual subtitle structure:", auto_caps[0] if auto_caps else "No entries")
+                    captions = info['subtitles']['en']
                     
-                    transcript_list = []
-                    for entry in auto_caps:
-                        if isinstance(entry, dict):
-                            transcript_list.append({
-                                'text': entry.get('text', ''),
-                                'start': float(entry.get('start', 0)),
-                                'duration': float(entry.get('duration', 0))
-                            })
-                    if transcript_list:
-                        return transcript_list
+                    # Find the VTT format caption
+                    vtt_caption = None
+                    for cap in captions:
+                        if isinstance(cap, dict) and cap.get('ext') == 'vtt':
+                            vtt_caption = cap
+                            break
+                    
+                    if vtt_caption and 'url' in vtt_caption:
+                        transcript_list = process_vtt_captions(vtt_caption['url'])
+                        if transcript_list:
+                            st.success("Successfully processed manual subtitles")
+                            return transcript_list
 
-                # If no manual subtitles, try automatic captions
-                if info.get('automatic_captions') and 'en' in info['automatic_captions']:
+                # Try automatic captions if manual ones failed
+                if not transcript_list and info.get('automatic_captions') and 'en' in info['automatic_captions']:
                     st.info("Found automatic English captions")
-                    auto_caps = info['automatic_captions']['en']
-                    # Debug the structure
-                    st.write("Automatic caption structure:", auto_caps[0] if auto_caps else "No entries")
+                    captions = info['automatic_captions']['en']
                     
-                    transcript_list = []
+                    # Find the VTT format caption
+                    vtt_caption = None
+                    for cap in captions:
+                        if isinstance(cap, dict) and cap.get('ext') == 'vtt':
+                            vtt_caption = cap
+                            break
                     
-                    for entry in auto_caps:
-                        if isinstance(entry, dict):
-                            # Debug each entry
-                            st.write("Processing caption entry:", entry)
-                            
-                            # Try to get the text from different possible locations
-                            text = None
-                            if 'text' in entry:
-                                text = entry['text']
-                            elif 'content' in entry:
-                                text = entry['content']
-                            elif 'fragments' in entry:
-                                text = ' '.join([f.get('text', '') for f in entry['fragments']])
-                            
-                            if text:
-                                transcript_list.append({
-                                    'text': text,
-                                    'start': float(entry.get('start', 0)),
-                                    'duration': float(entry.get('duration', 0))
-                                })
-                    
-                    if transcript_list:
-                        # Debug the final transcript
-                        st.write(f"Generated transcript with {len(transcript_list)} entries")
-                        st.write("First entry example:", transcript_list[0] if transcript_list else "No entries")
-                        return transcript_list
-                    
-                st.warning("No English subtitles or automatic captions found")
-                return None
+                    if vtt_caption and 'url' in vtt_caption:
+                        transcript_list = process_vtt_captions(vtt_caption['url'])
+                        if transcript_list:
+                            st.success("Successfully processed automatic captions")
+                            return transcript_list
+
+                if not transcript_list:
+                    st.warning("No captions could be extracted")
+                    return None
 
             except Exception as e:
                 st.error(f"Error extracting video info: {str(e)}")
@@ -190,6 +178,74 @@ def get_transcript_yt_dlp(video_id):
         return None
     
     return None
+
+def process_vtt_captions(url):
+    """Process VTT captions from URL"""
+    try:
+        # Download the VTT file
+        response = requests.get(url)
+        if response.status_code != 200:
+            st.error(f"Failed to download VTT file: {response.status_code}")
+            return None
+            
+        vtt_content = response.text
+        
+        # Save VTT content to a temporary file
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.vtt', delete=False, encoding='utf-8') as f:
+            f.write(vtt_content)
+            temp_vtt_path = f.name
+        
+        transcript_list = []
+        try:
+            # Parse the VTT file
+            import webvtt
+            for caption in webvtt.read(temp_vtt_path):
+                # Convert timestamp to seconds
+                start_parts = caption.start.split(':')
+                start_time = float(start_parts[0]) * 3600 + float(start_parts[1]) * 60 + float(start_parts[2])
+                
+                end_parts = caption.end.split(':')
+                end_time = float(end_parts[0]) * 3600 + float(end_parts[1]) * 60 + float(end_parts[2])
+                
+                # Clean the caption text
+                text = caption.text
+                text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
+                text = re.sub(r'\[[^\]]+\]', '', text)  # Remove metadata markers
+                text = re.sub(r'\([^)]+\)', '', text)  # Remove parenthetical content
+                text = re.sub(r'♪.*?♪', '', text)  # Remove musical note sections
+                text = re.sub(r'\s*\n\s*', ' ', text)  # Replace newlines with spaces
+                text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+                text = text.strip()
+                
+                if text:  # Only add non-empty captions
+                    transcript_list.append({
+                        'text': text,
+                        'start': start_time,
+                        'duration': end_time - start_time
+                    })
+            
+            if transcript_list:
+                st.write(f"Successfully parsed {len(transcript_list)} captions")
+                st.write("First caption:", transcript_list[0])
+                return transcript_list
+            else:
+                st.warning("No valid captions found in VTT file")
+                return None
+                
+        except Exception as e:
+            st.error(f"Error parsing VTT file: {str(e)}")
+            return None
+        finally:
+            # Clean up the temporary file
+            try:
+                os.unlink(temp_vtt_path)
+            except:
+                pass
+                
+    except Exception as e:
+        st.error(f"Error downloading/processing VTT: {str(e)}")
+        return None
 
 def get_transcript(video_id):
     """Get transcript with enhanced error handling and logging"""
@@ -249,7 +305,10 @@ def process_transcript(transcript):
             if isinstance(entry, dict):
                 text = entry.get('text', '')
                 if text and isinstance(text, str):
-                    text_entries.append(text.strip())
+                    # Clean the text entry
+                    text = clean_text(text)
+                    if text:  # Only add non-empty entries
+                        text_entries.append(text)
         
         if not text_entries:
             st.error("No valid text entries found in transcript")
@@ -260,18 +319,8 @@ def process_transcript(transcript):
         # Debug information
         st.write(f"Raw text length: {len(text)} characters")
         
-        # Clean the text
-        text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
-        text = re.sub(r'\[[^\]]+\]', '', text)  # Remove metadata markers
-        text = re.sub(r'\([^)]+\)', '', text)  # Remove parenthetical content
-        text = re.sub(r'♪.*?♪', '', text)  # Remove musical note sections
-        text = re.sub(r'\s*\n\s*', ' ', text)  # Replace newlines with spaces
-        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
-        
-        # Add periods to help with sentence splitting if missing
-        text = re.sub(r'([a-zA-Z0-9])\s+([A-Z])', r'\1. \2', text)
-        
-        cleaned_text = text.strip()
+        # Further clean and format the complete text
+        cleaned_text = post_process_text(text)
         
         # Debug information
         st.write(f"Cleaned text length: {len(cleaned_text)} characters")
@@ -285,6 +334,69 @@ def process_transcript(transcript):
     except Exception as e:
         st.error(f"Error processing transcript: {str(e)}")
         return ""
+
+def clean_text(text):
+    """Clean individual text entries"""
+    try:
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Remove metadata markers
+        text = re.sub(r'\[[^\]]+\]', '', text)
+        
+        # Remove parenthetical content (often contains speaker names or sound effects)
+        text = re.sub(r'\([^)]+\)', '', text)
+        
+        # Remove musical note sections
+        text = re.sub(r'♪.*?♪', '', text)
+        
+        # Remove emojis and special characters
+        text = re.sub(r'[^\x00-\x7F]+', '', text)
+        
+        # Replace newlines and tabs with spaces
+        text = re.sub(r'[\n\t\r]+', ' ', text)
+        
+        # Remove multiple spaces
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Strip whitespace
+        text = text.strip()
+        
+        return text
+        
+    except Exception as e:
+        st.error(f"Error cleaning text entry: {str(e)}")
+        return ""
+
+def post_process_text(text):
+    """Post-process the complete text"""
+    try:
+        # Add periods to help with sentence splitting if missing
+        text = re.sub(r'([a-zA-Z0-9])\s+([A-Z])', r'\1. \2', text)
+        
+        # Fix common caption artifacts
+        text = re.sub(r'\.{2,}', '.', text)  # Multiple periods
+        text = re.sub(r'\s*-\s*', ' - ', text)  # Standardize dashes
+        text = re.sub(r'\s*,\s*', ', ', text)  # Fix comma spacing
+        text = re.sub(r'\s*\.\s*', '. ', text)  # Fix period spacing
+        
+        # Remove repeated words (common in captions)
+        text = re.sub(r'\b(\w+)(\s+\1\b)+', r'\1', text, flags=re.IGNORECASE)
+        
+        # Fix sentence spacing
+        text = re.sub(r'\.\s*([a-zA-Z])', r'. \1', text)
+        
+        # Remove any remaining multiple spaces
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Strip whitespace
+        text = text.strip()
+        
+        return text
+        
+    except Exception as e:
+        st.error(f"Error post-processing text: {str(e)}")
+        return text  # Return original text if post-processing fails
 
 def chunk_text(text, chunk_size):
     """Split text into chunks of approximately equal size"""
